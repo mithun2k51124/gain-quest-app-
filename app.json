@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "GainQuest",
+    "slug": "gainquest-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0A0E1A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.gainquest.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0A0E1A"
+      },
+      "package": "com.gainquest.app"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "scheme": "gainquest",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6dfa8e78-1a73-4fac-84de-bbc5d9eef9dc"
+      }
+    }
+  }
+}
