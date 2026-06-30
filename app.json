@@ -20,7 +20,8 @@
       "package": "com.gainquest.app"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-font"
     ],
     "scheme": "gainquest",
     "experiments": {
