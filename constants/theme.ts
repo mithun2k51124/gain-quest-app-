@@ -1,55 +1,119 @@
-// constants/theme.ts
+// constants/theme.ts  –  Neumorphism (Soft UI) Theme
 
-export const C = {
-  bg:       '#0A0E1A',
-  surface:  '#111827',
-  card:     '#161C2A',
-  border:   '#1E2538',
-  accent:   '#7C3AED',
-  accentDim:'#4A148C',
-  muted:    '#3A4558',
-  text:     '#FFFFFF',
-  textSub:  '#8B9BAE',
-  textDim:  '#4A5568',
-
-  water:    '#29B6F6',
-  protein:  '#FFA726',
-  calories: '#EF5350',
-  green:    '#4CAF50',
-  greenDim: '#1B5E20',
-  red:      '#F44336',
-  redDim:   '#B71C1C',
-  yellow:   '#FFD700',
-  purple:   '#9C27B0',
-  orange:   '#FF9800',
-  teal:     '#00BCD4',
-
+export const LIGHT_THEME = {
+  bg:        '#E8ECF0',
+  surface:   '#E8ECF0',
+  card:      '#F0F4F8',
+  border:    '#D1D9E6',
+  shadowDark:  '#BFC8D6',
+  shadowLight: '#FFFFFF',
+  accent:    '#4A90D9',
+  accentDim: '#D6E4F4',
+  muted:     '#A0ABBF',
+  textDim:   '#8A96A8',
+  text:      '#2D3748',
+  textSub:   '#4A5568',
+  water:     '#29B6F6',
+  protein:   '#F5A623',
+  calories:  '#E05C5C',
+  green:     '#5BB98C',
+  greenDim:  '#D2F0E4',
+  red:       '#E05C5C',
+  redDim:    '#FAD5D5',
+  yellow:    '#F5C842',
+  purple:    '#8C6FD6',
+  orange:    '#F5A623',
+  teal:      '#36B8C8',
   mg: {
-    Chest:     '#E91E63',
-    Back:      '#2196F3',
-    Shoulders: '#9C27B0',
-    Biceps:    '#4CAF50',
-    Triceps:   '#00BCD4',
-    Legs:      '#FF9800',
-    Core:      '#FF5722',
-    Forearms:  '#795548',
-    Rest:      '#374151',
-  } as Record<string,string>,
-
+    Chest:        '#E05C5C', 'Upper Back': '#4A90D9', 'Lower Back': '#2563B0',
+    Shoulders:    '#8C6FD6', Biceps:      '#5BB98C', Triceps:     '#36B8C8',
+    Legs:         '#F5A623', Core:        '#F07850', Forearms:    '#A07860',
+    Rest:         '#A0ABBF',
+    // Legacy alias kept for old data
+    Back:         '#4A90D9',
+  } as Record<string, string>,
   mgDark: {
-    Chest:     '#3B0A1F',
-    Back:      '#0A1F3B',
-    Shoulders: '#2A0A3B',
-    Biceps:    '#0A2B0A',
-    Triceps:   '#002B2B',
-    Legs:      '#3B1F00',
-    Core:      '#3B0F00',
-    Forearms:  '#1C0F08',
-    Rest:      '#1A1F2E',
-  } as Record<string,string>,
+    Chest:        '#FAD5D5', 'Upper Back': '#D6E4F4', 'Lower Back': '#BFDBFE',
+    Shoulders:    '#E4DAFA', Biceps:      '#D2F0E4', Triceps:     '#D0F2F6',
+    Legs:         '#FDE8C8', Core:        '#FAE0D4', Forearms:    '#EEE0D8',
+    Rest:         '#DDE2EA', Back:        '#D6E4F4',
+  } as Record<string, string>,
 };
 
-export const MUSCLE_GROUPS = ['Chest','Back','Shoulders','Biceps','Triceps','Legs','Core','Forearms'];
+export const DARK_THEME = {
+  bg:        '#151A26',
+  surface:   '#151A26',
+  card:      '#1C2333',
+  border:    '#252D3D',
+  shadowDark:  '#0D1117',
+  shadowLight: '#252D3D',
+  accent:    '#5BA3E8',
+  accentDim: '#1A3150',
+  muted:     '#5A6880',
+  textDim:   '#6B7A8F',
+  text:      '#E8ECF0',
+  textSub:   '#B0BAD0',
+  water:     '#29B6F6',
+  protein:   '#F5A623',
+  calories:  '#E05C5C',
+  green:     '#5BB98C',
+  greenDim:  '#0E2D1E',
+  red:       '#E05C5C',
+  redDim:    '#2D0E0E',
+  yellow:    '#F5C842',
+  purple:    '#9B7FE8',
+  orange:    '#F5A623',
+  teal:      '#36B8C8',
+  mg: {
+    Chest:        '#E05C5C', 'Upper Back': '#5BA3E8', 'Lower Back': '#3B82F6',
+    Shoulders:    '#9B7FE8', Biceps:      '#5BB98C', Triceps:     '#36B8C8',
+    Legs:         '#F5A623', Core:        '#F07850', Forearms:    '#A07860',
+    Rest:         '#5A6880', Back:        '#5BA3E8',
+  } as Record<string, string>,
+  mgDark: {
+    Chest:        '#3D1A1A', 'Upper Back': '#1A2E4A', 'Lower Back': '#1E3A5F',
+    Shoulders:    '#2A1E4A', Biceps:      '#0E2D1E', Triceps:     '#0E2830',
+    Legs:         '#2D200A', Core:        '#2D1A0E', Forearms:    '#1E1410',
+    Rest:         '#1A1F2A', Back:        '#1A2E4A',
+  } as Record<string, string>,
+};
+
+// Default export keeps backward compat (light theme)
+export const C = LIGHT_THEME;
+
+export type Theme = typeof LIGHT_THEME;
+
+
+// ── Neumorphic Shadow Helpers ──────────────────────────────────────
+// Use these in your StyleSheet for the characteristic soft-shadow look.
+export const NEU = {
+  // Raised element (casts shadows outward)
+  raised: {
+    shadowColor:   '#BFC8D6',
+    shadowOffset:  { width: 6, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius:  10,
+    elevation:     6,
+  },
+  // The "highlight" layer is added as a separate white-shadow layer
+  // (iOS only supports one shadow; use borderColor tricks on Android)
+  highlight: {
+    shadowColor:   '#FFFFFF',
+    shadowOffset:  { width: -6, height: -6 },
+    shadowOpacity: 1,
+    shadowRadius:  10,
+  },
+  // Inset / pressed state  (achieved via inner borders on RN)
+  pressed: {
+    shadowColor:   '#BFC8D6',
+    shadowOffset:  { width: 4, height: 4 },
+    shadowOpacity: 0.6,
+    shadowRadius:  6,
+    elevation:     2,
+  },
+};
+
+export const MUSCLE_GROUPS = ['Chest','Upper Back','Lower Back','Shoulders','Biceps','Triceps','Legs','Core','Forearms'];
 export const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
 export const EXERCISE_LIBRARY: Record<string, string[]> = {
@@ -101,12 +165,12 @@ export const WATER_OPTIONS = [
 ];
 
 export const FEATURED_EXERCISES = [
-  { name:'Bench Press',    muscle:'Chest',     color:'#E91E63', icon:'💪' },
-  { name:'Squat',          muscle:'Legs',      color:'#FF9800', icon:'🦵' },
-  { name:'Deadlift',       muscle:'Back',      color:'#2196F3', icon:'🏋️' },
-  { name:'Overhead Press', muscle:'Shoulders', color:'#9C27B0', icon:'🏔️' },
-  { name:'Pull Up',        muscle:'Back',      color:'#00BCD4', icon:'🔝' },
-  { name:'Muscle Up',      muscle:'Back',      color:'#FF5722', icon:'⚡' },
-  { name:'Barbell Row',    muscle:'Back',      color:'#4CAF50', icon:'↕️' },
-  { name:'Dip',            muscle:'Chest',     color:'#FFC107', icon:'⬇️' },
+  { name:'Bench Press',    muscle:'Chest',     color:'#E05C5C', icon:'dumbbell', family: 'MaterialCommunityIcons' },
+  { name:'Squat',          muscle:'Legs',      color:'#F5A623', icon:'weight-lifter', family: 'MaterialCommunityIcons' },
+  { name:'Deadlift',       muscle:'Back',      color:'#4A90D9', icon:'barbell-outline', family: 'Ionicons' },
+  { name:'Overhead Press', muscle:'Shoulders', color:'#8C6FD6', icon:'arrow-up-circle-outline', family: 'Ionicons' },
+  { name:'Pull Up',        muscle:'Back',      color:'#36B8C8', icon:'arrow-up-outline', family: 'Ionicons' },
+  { name:'Muscle Up',      muscle:'Back',      color:'#F07850', icon:'flash-outline', family: 'Ionicons' },
+  { name:'Barbell Row',    muscle:'Back',      color:'#5BB98C', icon:'swap-vertical-outline', family: 'Ionicons' },
+  { name:'Dip',            muscle:'Chest',     color:'#F5C842', icon:'arrow-down-outline', family: 'Ionicons' },
 ];

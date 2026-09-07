@@ -6,11 +6,12 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Alert,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import {
   getWorkoutPlans,
   updateWorkoutPlan,
@@ -31,24 +32,298 @@ import {
   MuscleEntry,
   ExerciseLog,
 } from '../db/database';
-import { Card, Btn, MuscleTag, SectionHeader, PickerModal, EmptyState } from '../components/ui';
-import { C, MUSCLE_GROUPS, DAYS, EXERCISE_LIBRARY } from '../constants/theme';
+import { Card, Btn, MuscleTag, SectionHeader, EmptyState } from '../components/ui';
+import BodyAnatomy from '../components/BodyAnatomy';
+import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator } from 'react-native-draggable-flatlist';
+import { useTheme } from '../contexts/ThemeContext';
+import { useCustomAlert } from '../contexts/AlertContext';
+import { MUSCLE_GROUPS, DAYS, EXERCISE_LIBRARY } from '../constants/theme';
 
 type Tab = 'Planner' | 'Muscles' | 'Log' | 'History';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Neumorphic Bottom-Sheet Picker  (replaces old PickerModal from ui.tsx for
+// this screen, with grouped support)
+// ─────────────────────────────────────────────────────────────────────────────
+function NeuModal({
+  visible, title, onClose, children,
+}: {
+  visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
+}) {
+  const { C } = useTheme();
+  const neuStyles = makeNeuStyles(C);
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={neuStyles.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={neuStyles.sheet} onPress={e => e.stopPropagation()}>
+          <View style={neuStyles.handle} />
+          <Text style={neuStyles.sheetTitle}>{title}</Text>
+          {children}
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+function FlatOptions({
+  options, onSelect,
+}: { options: { label: string; value: string }[]; onSelect: (v: string) => void; }) {
+  const { C } = useTheme();
+  const neuStyles = makeNeuStyles(C);
+  return (
+    <ScrollView style={{ maxHeight: 380 }}>
+      {options.map(opt => (
+        <TouchableOpacity key={opt.value} style={neuStyles.optRow} onPress={() => onSelect(opt.value)}>
+          <Text style={neuStyles.optText}>{opt.label}</Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  );
+}
+
+function GroupedExercisePicker({
+  muscleGroups, onConfirm,
+}: {
+  muscleGroups: string[];
+  onConfirm: (selected: { muscle: string; exercise: string }[]) => void;
+}) {
+  const { C } = useTheme();
+  const neuStyles = makeNeuStyles(C);
+  const [openGroup, setOpenGroup] = useState<string | null>(muscleGroups[0] ?? null);
+  const [selected, setSelected] = useState<{ muscle: string; exercise: string }[]>([]);
+
+  const isSelected = (exercise: string) =>
+    selected.some(s => s.exercise === exercise);
+
+  const toggle = (muscle: string, exercise: string) => {
+    setSelected(prev =>
+      prev.some(s => s.exercise === exercise)
+        ? prev.filter(s => s.exercise !== exercise)
+        : [...prev, { muscle, exercise }]
+    );
+  };
+
+  return (
+    <View>
+      <ScrollView style={{ maxHeight: 360 }}>
+        {muscleGroups.map(mg => {
+          const exercises = EXERCISE_LIBRARY[mg] || [];
+          const isOpen = openGroup === mg;
+          const color = C.mg[mg] || C.accent;
+          const selectedInGroup = selected.filter(s => s.muscle === mg).length;
+
+          return (
+            <View key={mg}>
+              {/* Group header */}
+              <TouchableOpacity
+                style={[neuStyles.groupHeader, { borderLeftColor: color }]}
+                onPress={() => setOpenGroup(isOpen ? null : mg)}
+              >
+                <Text style={[neuStyles.groupTitle, { color }]}>{mg}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {selectedInGroup > 0 && (
+                    <View style={[neuStyles.groupBadge, { backgroundColor: color }]}>
+                      <Text style={neuStyles.groupBadgeText}>{selectedInGroup}</Text>
+                    </View>
+                  )}
+                  <Text style={[neuStyles.groupChevron, { color }]}>{isOpen ? '▲' : '▼'}</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Exercises */}
+              {isOpen && exercises.map(ex => {
+                const sel = isSelected(ex);
+                return (
+                  <TouchableOpacity
+                    key={ex}
+                    style={[neuStyles.exOptRow, sel && { backgroundColor: color + '18' }]}
+                    onPress={() => toggle(mg, ex)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[neuStyles.exCheckbox, sel && { backgroundColor: color, borderColor: color }]}>
+                      {sel && <Text style={neuStyles.exCheckmark}>✓</Text>}
+                    </View>
+                    <View style={[neuStyles.exDot, { backgroundColor: color }]} />
+                    <Text style={[neuStyles.exOptText, sel && { color: C.text, fontWeight: '700' }]}>{ex}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          );
+        })}
+      </ScrollView>
+
+      {/* Confirm button */}
+      <TouchableOpacity
+        style={[
+          neuStyles.confirmBtn,
+          { backgroundColor: selected.length > 0 ? C.accent : C.border },
+        ]}
+        onPress={() => {
+          if (selected.length > 0) onConfirm(selected);
+        }}
+        disabled={selected.length === 0}
+        activeOpacity={0.8}
+      >
+        <Text style={[
+          neuStyles.confirmBtnText,
+          { color: selected.length > 0 ? '#fff' : C.muted },
+        ]}>
+          {selected.length === 0
+            ? 'Select exercises above'
+            : `Add ${selected.length} Exercise${selected.length > 1 ? 's' : ''} ✓`}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Save Confirmation Toast
+// ─────────────────────────────────────────────────────────────────────────────
+function SaveToast({ visible, day }: { visible: boolean; day: string }) {
+  const { showAlert } = useCustomAlert();
+
+  const { C } = useTheme();
+  const neuStyles = makeNeuStyles(C);
+  if (!visible) return null;
+  return (
+    <View style={neuStyles.toast}>
+      <Text style={neuStyles.toastIcon}>✓</Text>
+      <Text style={neuStyles.toastText}>{day} plan saved!</Text>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exercise Log Card (Log tab)
+// ─────────────────────────────────────────────────────────────────────────────
+function ExerciseLogCard({
+  ex,
+  onLog,
+  loggedSets,
+  onDelete
+}: {
+  ex: WorkoutPlanExercise;
+  onLog: (s: number, r: number, w: number) => void;
+  loggedSets: ExerciseLog[];
+  onDelete?: () => void;
+}) {
+  const { C } = useTheme();
+  const styles = makeStyles(C);
+  const { showAlert } = useCustomAlert();
+  const [sets, setSets] = useState('1');
+  const [reps, setReps] = useState('8');
+  const [weight, setWeight] = useState('');
+
+  const [setsModal, setSetsModal] = useState(false);
+  const [repsModal, setRepsModal] = useState(false);
+
+  const handleLog = () => {
+    const w = parseFloat(weight);
+    if (isNaN(w)) {
+      showAlert('Weight', 'Enter a valid weight.');
+      return;
+    }
+    const s = parseInt(sets, 10);
+    const r = parseInt(reps, 10);
+    onLog(s, r, w);
+  };
+
+  return (
+    <Card accent={C.mg[ex.muscle_group] || C.accent}>
+      <View style={styles.section}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Text style={[styles.sectionTitle, { flex: 1 }]}>{ex.exercise_name}</Text>
+          {onDelete && (
+            <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
+              <Ionicons name="trash-outline" size={20} color={C.red} />
+            </TouchableOpacity>
+          )}
+        </View>
+        <Text style={{ fontSize: 13, color: C.mg[ex.muscle_group], marginBottom: 12, fontWeight: '700' }}>
+          {ex.muscle_group.toUpperCase()}
+        </Text>
+
+        {loggedSets.length > 0 && (
+          <View style={{ marginBottom: 16 }}>
+            {loggedSets.map((s, i) => (
+              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.mg[ex.muscle_group] || C.accent, marginRight: 8 }} />
+                <Text style={{ color: C.text, fontSize: 14 }}>
+                  Set {i + 1}:  <Text style={{ fontWeight: '700' }}>{s.reps}</Text> reps @ <Text style={{ fontWeight: '700' }}>{s.weight}</Text> kg
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={styles.setsRow}>
+          <TouchableOpacity style={styles.setsBox} onPress={() => setSetsModal(true)}>
+            <Text style={styles.setsLabel}>Sets</Text>
+            <Text style={styles.setsVal}>{sets}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.setsBox} onPress={() => setRepsModal(true)}>
+            <Text style={styles.setsLabel}>Reps</Text>
+            <Text style={styles.setsVal}>{reps}</Text>
+          </TouchableOpacity>
+          <View style={[styles.setsBox, { flex: 2 }]}>
+            <Text style={styles.setsLabel}>Weight (kg)</Text>
+            <TextInput
+              style={styles.setsInput}
+              keyboardType="decimal-pad"
+              value={weight}
+              onChangeText={setWeight}
+              placeholder="60"
+              placeholderTextColor={C.muted}
+            />
+          </View>
+        </View>
+
+        <View style={{ marginTop: 16 }}>
+          <Btn label="+ Log Set" color={C.mg[ex.muscle_group] || C.accent} onPress={handleLog} small />
+        </View>
+      </View>
+
+      <NeuModal visible={setsModal} title="Sets" onClose={() => setSetsModal(false)}>
+        <FlatOptions
+          options={['1','2','3','4','5'].map(v => ({ label: v, value: v }))}
+          onSelect={v => { setSets(v); setSetsModal(false); }}
+        />
+      </NeuModal>
+      <NeuModal visible={repsModal} title="Reps" onClose={() => setRepsModal(false)}>
+        <FlatOptions
+          options={['1','2','3','4','5','6','8','10','12','15','20'].map(v => ({ label: v, value: v }))}
+          onSelect={v => { setReps(v); setRepsModal(false); }}
+        />
+      </NeuModal>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Screen
+// ─────────────────────────────────────────────────────────────────────────────
 export default function WorkoutsScreen() {
+  const { showAlert } = useCustomAlert();
+
+
+  const { C, isDark } = useTheme();
+  const styles = makeStyles(C);
   const [tab, setTab] = useState<Tab>('Planner');
   const [plans, setPlans] = useState<WorkoutPlan[]>([]);
   const [planExercises, setPlanExercises] = useState<WorkoutPlanExercise[]>([]);
   const [muscles, setMuscles] = useState<MuscleEntry[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [refresh, setRefresh] = useState(false);
 
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [sessionDate, setSessionDate] = useState(todayStr());
-  const [sessionMGs, setSessionMGs] = useState<string[]>([]);
   const [sessionNotes, setSessionNotes] = useState('');
   const [exercises, setExercises] = useState<any[]>([]);
+  const [sessionMGs, setSessionMGs] = useState<string[]>([]);
+  const [todaysExercises, setTodaysExercises] = useState<WorkoutPlanExercise[]>([]);
 
   const [selMuscle, setSelMuscle] = useState('Chest');
   const [selExercise, setSelExercise] = useState('Bench Press');
@@ -62,78 +337,67 @@ export default function WorkoutsScreen() {
 
   const [prData, setPrData] = useState<any | null>(null);
 
+  // Saved toast state
+  const [savedDay, setSavedDay] = useState<string | null>(null);
+
   const load = useCallback(() => {
     setPlans(getWorkoutPlans());
     setPlanExercises(getWorkoutPlanExercises());
     setMuscles(getMuscleTracker());
     setSessions(getWorkoutSessions(20));
+    
+    const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+    setTodaysExercises(getWorkoutPlanExercises(dayName));
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const onRefresh = () => {
     setRefresh(true);
     load();
     setRefresh(false);
   };
+  const tabs: Tab[] = ['Planner', 'Log', 'Muscles', 'History'];
 
-  const tabs: Tab[] = ['Planner', 'Muscles', 'Log', 'History'];
+  const addExerciseSet = (exName: string, exMuscle: string, s: number, r: number, w: number) => {
+    let currentSessionId = sessionId;
+    
+    if (!currentSessionId) {
+      const mgs = Array.from(new Set(todaysExercises.map(e => e.muscle_group))).join(', ');
+      currentSessionId = createWorkoutSession(sessionDate, mgs || 'Mixed', sessionNotes);
+      setSessionId(currentSessionId);
 
-  const startSession = () => {
-    if (!sessionMGs.length) {
-      Alert.alert('Select', 'Pick at least one muscle group.');
-      return;
+      if (sessionDate === todayStr()) {
+        updateDailyLog(todayStr(), { workout_completed: 1 });
+        updateStreak();
+      }
     }
 
-    const id = createWorkoutSession(sessionDate, sessionMGs.join(','), sessionNotes);
-    setSessionId(id);
-    setExercises([]);
+    const { isNewPR, oldPR, new1RM } = checkPRForLog(exName, s, r, w);
 
-    if (sessionDate === todayStr()) {
-      updateDailyLog(todayStr(), { workout_completed: 1 });
-      updateStreak();
-    }
-
-    Alert.alert('Session Started!', 'Log your exercises below.');
-  };
-
-  const addExercise = () => {
-    if (!sessionId) {
-      Alert.alert('Start a session first.');
-      return;
-    }
-
-    const w = parseFloat(weight);
-    if (!w || isNaN(w)) {
-      Alert.alert('Enter weight.');
-      return;
-    }
-
-    const s = parseInt(sets, 10);
-    const r = parseInt(reps, 10);
-
-    const { isNewPR, oldPR, new1RM } = checkPRForLog(selExercise, s, r, w);
-
-    logExercise(sessionId, sessionDate, selExercise, selMuscle, s, r, w);
+    logExercise(currentSessionId, sessionDate, exName, exMuscle, s, r, w);
 
     setExercises(prev => [
       ...prev,
-      { name: selExercise, muscle: selMuscle, sets: s, reps: r, weight: w },
+      { name: exName, muscle: exMuscle, sets: s, reps: r, weight: w },
     ]);
-    setWeight('');
 
     if (isNewPR) {
-      setPrData({ exercise: selExercise, oldPR, new1RM, weight: w, reps: r });
+      setPrData({ exercise: exName, oldPR, new1RM, weight: w, reps: r });
     }
   };
 
   const finishSession = () => {
     if (!exercises.length) {
-      Alert.alert('Add at least one exercise.');
+      showAlert('Add at least one exercise.');
       return;
     }
 
-    Alert.alert('Session Complete!', `${exercises.length} exercises logged.`);
+    showAlert('Session Complete!', `${exercises.length} exercises logged.`);
     setSessionId(null);
     setExercises([]);
     setSessionMGs([]);
@@ -176,7 +440,7 @@ export default function WorkoutsScreen() {
         ))}
       </View>
 
-      <ScrollView
+      <NestableScrollContainer
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
       >
@@ -187,6 +451,9 @@ export default function WorkoutsScreen() {
             onSave={(day, name, mgs) => {
               updateWorkoutPlan(day, name, mgs);
               load();
+              // Show toast feedback
+              setSavedDay(day);
+              setTimeout(() => setSavedDay(null), 2000);
             }}
             onAddExercise={(day, exercise, muscle) => {
               addWorkoutPlanExercise(day, exercise, muscle);
@@ -210,9 +477,9 @@ export default function WorkoutsScreen() {
               return (
                 <View
                   key={m.muscle_group}
-                  style={[styles.muscleCard, { borderColor: daysAgo > 7 ? C.red : C.border }]}
+                  style={styles.muscleCard}
                 >
-                  <View style={[styles.muscleIcon, { backgroundColor: mgColor + '33' }]}>
+                  <View style={[styles.muscleIcon, { backgroundColor: mgColor + '22' }]}>
                     <Text style={{ fontSize: 20 }}>💪</Text>
                   </View>
                   <View style={{ flex: 1 }}>
@@ -226,6 +493,8 @@ export default function WorkoutsScreen() {
                     </Text>
                     <Text style={styles.muscleSessions}>Sessions: {m.total_sessions}</Text>
                   </View>
+                  {/* Recovery indicator bar */}
+                  <View style={[styles.recoveryDot, { backgroundColor: color }]} />
                 </View>
               );
             })}
@@ -234,132 +503,77 @@ export default function WorkoutsScreen() {
 
         {tab === 'Log' && (
           <>
-            {!sessionId ? (
-              <Card accent={C.accent}>
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>New Session</Text>
+            <View style={{ paddingHorizontal: 4, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: C.text }}>
+                {sessionId ? `Session #${sessionId}` : "Today's Workout"}
+              </Text>
+              {sessionId !== null && (
+                <TouchableOpacity onPress={finishSession} style={{ paddingHorizontal: 16, paddingVertical: 8, backgroundColor: C.water, borderRadius: 12 }}>
+                  <Text style={{ color: '#fff', fontWeight: '700' }}>Finish</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
-                  <Text style={styles.fieldLabel}>Date</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={sessionDate}
-                    onChangeText={setSessionDate}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={C.muted}
-                  />
-
-                  <Text style={styles.fieldLabel}>Muscle Groups</Text>
-                  <View style={styles.mgGrid}>
-                    {MUSCLE_GROUPS.map(mg => (
-                      <TouchableOpacity
-                        key={mg}
-                        style={[
-                          styles.mgPill,
-                          {
-                            borderColor: sessionMGs.includes(mg) ? C.mg[mg] : C.border,
-                            backgroundColor: sessionMGs.includes(mg) ? C.mg[mg] + '33' : C.surface,
-                          },
-                        ]}
-                        onPress={() => toggleMG(mg)}
-                      >
-                        <Text
-                          style={[
-                            styles.mgPillText,
-                            { color: sessionMGs.includes(mg) ? C.mg[mg] : C.muted },
-                          ]}
-                        >
-                          {mg}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <Text style={styles.fieldLabel}>Notes</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={sessionNotes}
-                    onChangeText={setSessionNotes}
-                    placeholder="Session notes..."
-                    placeholderTextColor={C.muted}
-                  />
-
-                  <Btn label="Start Session" color={C.accent} onPress={startSession} />
-                </View>
-              </Card>
+            {todaysExercises.length === 0 ? (
+              <EmptyState
+                icon="calendar-outline"
+                message="No Plan for Today"
+                sub="Go to Planner tab and add exercises for today."
+              />
             ) : (
               <>
-                <Card accent={C.green}>
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Add Exercise - Session #{sessionId}</Text>
-
-                    <TouchableOpacity style={styles.selectRow} onPress={() => setMuscleModal(true)}>
-                      <Text style={styles.fieldLabel}>Muscle Group</Text>
-                      <Text style={[styles.selectVal, { color: C.mg[selMuscle] }]}>
-                        {selMuscle} ›
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.selectRow} onPress={() => setExModal(true)}>
-                      <Text style={styles.fieldLabel}>Exercise</Text>
-                      <Text style={[styles.selectVal, { color: C.accent }]}>
-                        {selExercise} ›
-                      </Text>
-                    </TouchableOpacity>
-
-                    <View style={styles.setsRow}>
-                      <TouchableOpacity
-                        style={[styles.setsBox, { borderColor: C.border }]}
-                        onPress={() => setSetsModal(true)}
-                      >
-                        <Text style={styles.setsLabel}>Sets</Text>
-                        <Text style={styles.setsVal}>{sets}</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.setsBox, { borderColor: C.border }]}
-                        onPress={() => setRepsModal(true)}
-                      >
-                        <Text style={styles.setsLabel}>Reps</Text>
-                        <Text style={styles.setsVal}>{reps}</Text>
-                      </TouchableOpacity>
-
-                      <View style={[styles.setsBox, { borderColor: C.border, flex: 2 }]}>
-                        <Text style={styles.setsLabel}>Weight (kg)</Text>
-                        <TextInput
-                          style={styles.setsInput}
-                          keyboardType="decimal-pad"
-                          value={weight}
-                          onChangeText={setWeight}
-                          placeholder="60"
-                          placeholderTextColor={C.muted}
-                        />
-                      </View>
-                    </View>
-
-                    <View style={[styles.btnRow, { marginTop: 12 }]}>
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <Btn label="+ Add Exercise" color={C.green} onPress={addExercise} />
-                      </View>
-                      <Btn label="Finish" color={C.water} onPress={finishSession} />
-                    </View>
-                  </View>
-                </Card>
-
-                {exercises.length > 0 && (
+                {!sessionId && (
                   <Card accent={C.accent}>
                     <View style={styles.section}>
-                      <Text style={styles.sectionTitle}>
-                        {exercises.length} Exercise{exercises.length > 1 ? 's' : ''} Logged
-                      </Text>
-                      {exercises.map((ex, i) => (
-                        <View key={i} style={styles.exRow}>
-                          <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle] || C.accent }]} />
-                          <Text style={styles.exName}>{ex.name}</Text>
-                          <Text style={styles.exDetail}>
-                            {ex.sets}x{ex.reps} @ {ex.weight}kg
-                          </Text>
-                        </View>
-                      ))}
+                      <Text style={styles.fieldLabel}>Date</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={sessionDate}
+                        onChangeText={setSessionDate}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={C.muted}
+                      />
+
+                      <Text style={styles.fieldLabel}>Notes</Text>
+                      <TextInput
+                        style={[styles.input, { marginBottom: 0 }]}
+                        value={sessionNotes}
+                        onChangeText={setSessionNotes}
+                        placeholder="Session notes..."
+                        placeholderTextColor={C.muted}
+                      />
+                    </View>
+                  </Card>
+                )}
+
+                <NestableDraggableFlatList
+                  data={todaysExercises}
+                  keyExtractor={(item) => item.id.toString() + item.exercise_name}
+                  onDragEnd={({ data }) => setTodaysExercises(data)}
+                  renderItem={({ item, drag, isActive }) => (
+                    <ScaleDecorator>
+                      <TouchableOpacity
+                        onLongPress={drag}
+                        disabled={isActive}
+                        activeOpacity={1}
+                        style={{ elevation: isActive ? 5 : 0 }}
+                      >
+                        <ExerciseLogCard
+                          ex={item}
+                          onLog={(s, r, w) => addExerciseSet(item.exercise_name, item.muscle_group, s, r, w)}
+                          loggedSets={exercises.filter(e => e.name === item.exercise_name)}
+                          onDelete={() => setTodaysExercises(prev => prev.filter(e => e.id !== item.id))}
+                        />
+                      </TouchableOpacity>
+                    </ScaleDecorator>
+                  )}
+                />
+
+                {sessionId !== null && (
+                  <Card accent={C.green}>
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Done For Today?</Text>
+                      <Btn label="Finish Workout" color={C.water} onPress={finishSession} />
                     </View>
                   </Card>
                 )}
@@ -368,100 +582,214 @@ export default function WorkoutsScreen() {
           </>
         )}
 
-        {tab === 'History' && (
-          <>
-            <SectionHeader title="Workout History" />
-            {sessions.length === 0 ? (
-              <EmptyState icon="📋" message="No workouts logged yet" sub="Go to Log tab to start tracking" />
-            ) : (
-              sessions.map(s => {
-                const exs = getSessionExercises(s.id);
+        {tab === 'History' && (() => {
+          const activeSession = sessions.find(s => s.id === selectedHistoryId) || sessions[0] || null;
+          const exsForActive = activeSession ? getSessionExercises(activeSession.id) : [];
 
-                return (
-                  <Card key={s.id} accent={C.accent}>
-                    <View style={styles.section}>
-                      <View style={styles.histHeader}>
-                        <Text style={styles.histDate}>{s.session_date}</Text>
-                        <View style={styles.mgRow}>
-                          {s.muscle_groups.split(',').slice(0, 3).map((g: string) => (
-                            <MuscleTag key={g} name={g.trim()} />
-                          ))}
-                        </View>
+          // Compute total sets per muscle group for active session
+          const setCountsMap: Record<string, number> = {};
+          if (activeSession) {
+            for (const ex of exsForActive) {
+              const mg = ex.muscle_group;
+              if (mg) {
+                setCountsMap[mg] = (setCountsMap[mg] || 0) + (ex.sets || 1);
+              }
+            }
+            // Fallback to session.muscle_groups if no individual exercise logs exist
+            if (Object.keys(setCountsMap).length === 0 && activeSession.muscle_groups) {
+              for (const p of activeSession.muscle_groups.split(',')) {
+                const cleaned = p.trim();
+                if (cleaned) setCountsMap[cleaned] = 1;
+              }
+            }
+          }
+
+          return (
+            <>
+              <SectionHeader title="Workout Anatomy & History" />
+
+              {/* ── Anatomy Diagram Card ── */}
+              <Card accent={C.red}>
+                <View style={styles.section}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <Text style={styles.sectionTitle}>
+                      {activeSession ? `Session: ${activeSession.session_date}` : 'Target Muscles'}
+                    </Text>
+                    {activeSession && (
+                      <View style={{ backgroundColor: C.red + '22', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                        <Text style={{ fontSize: 11, color: C.red, fontWeight: '800' }}>
+                          {activeSession.muscle_groups}
+                        </Text>
                       </View>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
+                    Green intensity increases with sets completed (1 set light green, 4+ sets deep emerald).
+                  </Text>
 
-                      {exs.slice(0, 5).map((ex: ExerciseLog) => (
-                        <View key={ex.id} style={styles.exRow}>
-                          <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
-                          <Text style={styles.exName}>{ex.exercise_name}</Text>
-                          <Text style={styles.exDetail}>
-                            {ex.sets}x{ex.reps} @ {ex.weight}{ex.unit}
-                          </Text>
-                        </View>
-                      ))}
+                  {/* Body Vector Anatomy with Set Volume Heatmap */}
+                  <BodyAnatomy muscleSetCounts={setCountsMap} />
 
-                      {exs.length > 5 && (
-                        <Text style={styles.moreText}>+ {exs.length - 5} more exercises</Text>
-                      )}
+                  {/* Date / Session Selector Horizontal Carousel */}
+                  {sessions.length > 0 && (
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        Select Date / Session:
+                      </Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+                        {sessions.map(s => {
+                          const isSel = activeSession?.id === s.id;
+                          return (
+                            <TouchableOpacity
+                              key={s.id}
+                              onPress={() => setSelectedHistoryId(s.id)}
+                              style={{
+                                paddingVertical: 6,
+                                paddingHorizontal: 14,
+                                borderRadius: 12,
+                                backgroundColor: isSel ? C.red : (isDark ? '#1C2333' : '#E2E8F0'),
+                                borderWidth: 1,
+                                borderColor: isSel ? C.red : C.border,
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: isSel ? '#FFF' : C.text }}>
+                                {s.session_date}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
                     </View>
-                  </Card>
-                );
-              })
-            )}
-          </>
-        )}
-      </ScrollView>
+                  )}
+                </View>
+              </Card>
 
-      <PickerModal
-        visible={muscleModal}
-        title="Select Muscle Group"
-        options={MUSCLE_GROUPS.map(m => ({ label: m, value: m }))}
-        onSelect={v => {
-          setSelMuscle(v);
-          setSelExercise(EXERCISE_LIBRARY[v]?.[0] || '');
-        }}
-        onClose={() => setMuscleModal(false)}
-      />
+              <SectionHeader title="Past Sessions" />
+              {sessions.length === 0 ? (
+                <EmptyState icon="clipboard-outline" message="No workouts logged yet" sub="Go to Log tab to start tracking" />
+              ) : (
+                sessions.map(s => {
+                  const isSelected = activeSession?.id === s.id;
+                  const exs = getSessionExercises(s.id);
 
-      <PickerModal
-        visible={exModal}
-        title="Select Exercise"
-        options={(EXERCISE_LIBRARY[selMuscle] || []).map(e => ({ label: e, value: e }))}
-        onSelect={v => setSelExercise(v)}
-        onClose={() => setExModal(false)}
-      />
+                  return (
+                    <TouchableOpacity
+                      key={s.id}
+                      activeOpacity={0.85}
+                      onPress={() => setSelectedHistoryId(s.id)}
+                      style={{ marginBottom: 14 }}
+                    >
+                      <Card accent={isSelected ? C.red : C.accent}>
+                        <View style={styles.section}>
+                          <View style={styles.histHeader}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <Text style={[styles.histDate, isSelected && { color: C.red, fontWeight: '800' }]}>
+                                {s.session_date}
+                              </Text>
+                              {isSelected && (
+                                <View style={{ backgroundColor: C.red, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>VIEWING</Text>
+                                </View>
+                              )}
+                            </View>
+                            <View style={styles.mgRow}>
+                              {s.muscle_groups.split(',').slice(0, 3).map((g: string) => (
+                                <MuscleTag key={g} name={g.trim()} />
+                              ))}
+                            </View>
+                          </View>
+                          {s.notes ? (
+                            <Text style={{ fontSize: 13, color: C.textSub, marginBottom: 12, fontStyle: 'italic' }}>
+                              "{s.notes}"
+                            </Text>
+                          ) : null}
 
-      <PickerModal
-        visible={setsModal}
-        title="Sets"
-        options={['1', '2', '3', '4', '5', '6', '7', '8'].map(v => ({ label: v, value: v }))}
-        onSelect={v => setSets(v)}
-        onClose={() => setSetsModal(false)}
-      />
+                          {exs.slice(0, 5).map((ex: ExerciseLog) => (
+                            <View key={ex.id} style={styles.exRow}>
+                              <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
+                              <Text style={styles.exName}>{ex.exercise_name}</Text>
+                              <Text style={styles.exDetail}>
+                                {ex.sets}x{ex.reps} @ {ex.weight}{ex.unit}
+                              </Text>
+                            </View>
+                          ))}
 
-      <PickerModal
-        visible={repsModal}
-        title="Reps"
-        options={['1', '2', '3', '4', '5', '6', '8', '10', '12', '15', '20', '25'].map(v => ({ label: v, value: v }))}
-        onSelect={v => setReps(v)}
-        onClose={() => setRepsModal(false)}
-      />
+                          {exs.length > 5 && (
+                            <Text style={styles.moreText}>+ {exs.length - 5} more exercises</Text>
+                          )}
+                        </View>
+                      </Card>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </>
+          );
+        })()}
+      </NestableScrollContainer>
 
+      {/* ── Save Toast ── */}
+      <SaveToast visible={!!savedDay} day={savedDay || ''} />
+
+      {/* ── Muscle Group Picker (Log tab) ── */}
+      <NeuModal visible={muscleModal} title="Select Muscle Group" onClose={() => setMuscleModal(false)}>
+        <FlatOptions
+          options={MUSCLE_GROUPS.map(m => ({ label: m, value: m }))}
+          onSelect={v => {
+            setSelMuscle(v);
+            setSelExercise(EXERCISE_LIBRARY[v]?.[0] || '');
+            setMuscleModal(false);
+          }}
+        />
+      </NeuModal>
+
+      {/* ── Exercise Picker (Log tab) ── */}
+      <NeuModal visible={exModal} title="Select Exercise" onClose={() => setExModal(false)}>
+        <FlatOptions
+          options={(EXERCISE_LIBRARY[selMuscle] || []).map(e => ({ label: e, value: e }))}
+          onSelect={v => {
+            setSelExercise(v);
+            setExModal(false);
+          }}
+        />
+      </NeuModal>
+
+      {/* ── Sets Picker ── */}
+      <NeuModal visible={setsModal} title="Sets" onClose={() => setSetsModal(false)}>
+        <FlatOptions
+          options={['1','2','3','4','5','6','7','8'].map(v => ({ label: v, value: v }))}
+          onSelect={v => { setSets(v); setSetsModal(false); }}
+        />
+      </NeuModal>
+
+      {/* ── Reps Picker ── */}
+      <NeuModal visible={repsModal} title="Reps" onClose={() => setRepsModal(false)}>
+        <FlatOptions
+          options={['1','2','3','4','5','6','8','10','12','15','20','25'].map(v => ({ label: v, value: v }))}
+          onSelect={v => { setReps(v); setRepsModal(false); }}
+        />
+      </NeuModal>
+
+      {/* ── PR Celebration Overlay ── */}
       {prData && (
         <View style={styles.prOverlay}>
           <View style={styles.prCard}>
-            <Text style={{ fontSize: 48, textAlign: 'center' }}>🎉</Text>
-            <Text style={styles.prTitle}>NEW PERSONAL RECORD!</Text>
+            <Text style={{ fontSize: 52, textAlign: 'center' }}>🏆</Text>
+            <Text style={styles.prTitle}>NEW PERSONAL{'\n'}RECORD!</Text>
             <Text style={styles.prExercise}>{prData.exercise}</Text>
+            <View style={styles.prDivider} />
             {prData.oldPR && (
               <Text style={styles.prOld}>
-                Previous: {prData.oldPR.weight}kg x {prData.oldPR.reps} reps
+                Previous: {prData.oldPR.weight}kg × {prData.oldPR.reps} reps
               </Text>
             )}
             <Text style={styles.prNew}>
-              {prData.weight}kg x {prData.reps} reps
+              {prData.weight}kg × {prData.reps} reps
             </Text>
             <Text style={styles.pr1rm}>e1RM: {prData.new1RM.toFixed(1)} kg</Text>
-            <Btn label="Let's Go!" color={C.accent} onPress={() => setPrData(null)} />
+            <View style={{ width: '100%', marginTop: 8 }}>
+              <Btn label="Let's Go! 🎉" color={C.accent} onPress={() => setPrData(null)} />
+            </View>
           </View>
         </View>
       )}
@@ -469,6 +797,9 @@ export default function WorkoutsScreen() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PlannerTab
+// ─────────────────────────────────────────────────────────────────────────────
 function PlannerTab({
   plans,
   planExercises,
@@ -482,10 +813,13 @@ function PlannerTab({
   onAddExercise: (day: string, exercise: string, muscle: string) => void;
   onDeleteExercise: (id: number) => void;
 }) {
+  const { C } = useTheme();
+  const styles = makeStyles(C);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const planMap = Object.fromEntries(plans.map(p => [p.day_of_week, p]));
   const [edits, setEdits] = useState<Record<string, { name: string; mgs: string[] }>>({});
   const [exerciseDay, setExerciseDay] = useState<string | null>(null);
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
 
   const getEdit = (day: string) =>
     edits[day] || {
@@ -501,23 +835,14 @@ function PlannerTab({
   const togglePlanMG = (day: string, mg: string) => {
     const cur = getEdit(day);
     const mgs = cur.mgs.includes(mg) ? cur.mgs.filter(m => m !== mg) : [...cur.mgs, mg];
-
     updateEdit(day, 'mgs', mgs);
   };
 
-  const exerciseOptions = (() => {
-    if (!exerciseDay) return [];
-
-    const selected = getEdit(exerciseDay).mgs.filter(mg => mg !== 'Rest');
-    const muscles = selected.length ? selected : MUSCLE_GROUPS;
-
-    return muscles.flatMap(mg =>
-      (EXERCISE_LIBRARY[mg] || []).map(ex => ({
-        label: `${ex} (${mg})`,
-        value: `${mg}:::${ex}`,
-      }))
-    );
-  })();
+  // Which muscle groups are selected for the current exercise day
+  const exerciseMuscles = exerciseDay
+    ? getEdit(exerciseDay).mgs.filter(mg => mg !== 'Rest' && EXERCISE_LIBRARY[mg])
+    : [];
+  const musclesForPicker = exerciseMuscles.length ? exerciseMuscles : MUSCLE_GROUPS;
 
   return (
     <>
@@ -561,7 +886,7 @@ function PlannerTab({
                       styles.mgPill,
                       {
                         borderColor: sel ? col : C.border,
-                        backgroundColor: sel ? col + '33' : C.surface,
+                        backgroundColor: sel ? col + '22' : C.bg,
                       },
                     ]}
                     onPress={() => togglePlanMG(day, mg)}
@@ -576,19 +901,55 @@ function PlannerTab({
 
             {exercisesForDay.length > 0 && (
               <View style={styles.plannedList}>
-                {exercisesForDay.map(ex => (
-                  <View key={ex.id} style={styles.plannedExerciseRow}>
-                    <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
-                    <Text style={styles.exName}>{ex.exercise_name}</Text>
-                    <Text style={styles.plannedMuscle}>{ex.muscle_group}</Text>
-                    <TouchableOpacity
-                      onPress={() => onDeleteExercise(ex.id)}
-                      style={styles.deletePlanExBtn}
-                    >
-                      <Text style={styles.deletePlanExText}>×</Text>
-                    </TouchableOpacity>
+                {/* Collapse/Expand toggle */}
+                <TouchableOpacity
+                  style={styles.viewExBtn}
+                  onPress={() =>
+                    setExpandedDays(prev => {
+                      const next = new Set(prev);
+                      next.has(day) ? next.delete(day) : next.add(day);
+                      return next;
+                    })
+                  }
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.viewExBtnText}>
+                    {expandedDays.has(day)
+                      ? `▲ Hide exercises`
+                      : `▼ View ${exercisesForDay.length} exercise${exercisesForDay.length > 1 ? 's' : ''}`}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Expanded list */}
+                {expandedDays.has(day) && (
+                  <View style={{ marginTop: 10 }}>
+                    {Object.entries(
+                      exercisesForDay.reduce((acc, ex) => {
+                        if (!acc[ex.muscle_group]) acc[ex.muscle_group] = [];
+                        acc[ex.muscle_group].push(ex);
+                        return acc;
+                      }, {} as Record<string, WorkoutPlanExercise[]>)
+                    ).map(([mg, exList]) => (
+                      <View key={mg}>
+                        <Text style={[styles.plannedMuscleHeader, { color: C.mg[mg] || C.accent }]}>
+                          {mg}
+                        </Text>
+                        {exList.map(ex => (
+                          <View key={ex.id} style={styles.plannedExerciseRow}>
+                            <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
+                            <Text style={styles.exName}>{ex.exercise_name}</Text>
+                            <TouchableOpacity
+                              onPress={() => onDeleteExercise(ex.id)}
+                              style={styles.deletePlanExBtn}
+                            >
+                              <Text style={styles.deletePlanExText}>×</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    ))}
                   </View>
-                ))}
+                )}
               </View>
             )}
 
@@ -607,37 +968,43 @@ function PlannerTab({
         );
       })}
 
-      <PickerModal
+      {/* ── Grouped Exercise Picker for Weekly Plan — Multi-select ── */}
+      <NeuModal
         visible={!!exerciseDay}
-        title="Add Exercise"
-        options={exerciseOptions}
-        onSelect={v => {
-          if (!exerciseDay) return;
-
-          const [muscle, exercise] = v.split(':::');
-
-          onAddExercise(exerciseDay, exercise, muscle);
-          setExerciseDay(null);
-        }}
+        title={`Add Exercises${exerciseDay ? ` — ${exerciseDay}` : ''}`}
         onClose={() => setExerciseDay(null)}
-      />
+      >
+        <GroupedExercisePicker
+          muscleGroups={musclesForPicker}
+          onConfirm={(selections) => {
+            if (!exerciseDay) return;
+            selections.forEach(({ muscle, exercise }) => {
+              onAddExercise(exerciseDay, exercise, muscle);
+            });
+            setExerciseDay(null);
+          }}
+        />
+      </NeuModal>
     </>
   );
 }
 
-const styles = StyleSheet.create({
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
+function makeStyles(C: any) { return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   header: {
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: C.surface,
+    backgroundColor: C.bg,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
   headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: C.surface,
+    backgroundColor: C.bg,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
@@ -648,16 +1015,20 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, paddingBottom: 40 },
   section: { padding: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: C.text, marginBottom: 12 },
-  fieldLabel: { fontSize: 11, color: C.muted, marginBottom: 4, marginTop: 8 },
+  fieldLabel: { fontSize: 11, color: C.muted, marginBottom: 4, marginTop: 8, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   input: {
-    backgroundColor: C.card,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.border,
+    backgroundColor: C.bg,
+    borderRadius: 12,
+    borderWidth: 0,
     color: C.text,
     padding: 12,
     fontSize: 14,
-    marginBottom: 8,
+    marginBottom: 10,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 4,
   },
   mgGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   mgPill: {
@@ -680,12 +1051,17 @@ const styles = StyleSheet.create({
   setsBox: {
     flex: 1,
     backgroundColor: C.card,
-    borderWidth: 1,
-    borderRadius: 10,
+    borderWidth: 0,
+    borderRadius: 12,
     padding: 12,
     alignItems: 'center',
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  setsLabel: { fontSize: 10, color: C.muted, marginBottom: 4 },
+  setsLabel: { fontSize: 10, color: C.muted, marginBottom: 4, textTransform: 'uppercase' },
   setsVal: { fontSize: 20, fontWeight: '800', color: C.text },
   setsInput: {
     fontSize: 20,
@@ -709,15 +1085,21 @@ const styles = StyleSheet.create({
   histHeader: { marginBottom: 8 },
   histDate: { fontSize: 14, fontWeight: '700', color: C.accent, marginBottom: 6 },
   moreText: { fontSize: 11, color: C.muted, marginTop: 4 },
+  recoveryDot: { width: 10, height: 10, borderRadius: 5 },
   muscleCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: C.card,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 16,
+    borderWidth: 0,
     padding: 14,
-    marginBottom: 10,
+    marginBottom: 12,
     gap: 14,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 5, height: 5 },
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    elevation: 6,
   },
   muscleIcon: {
     width: 44,
@@ -731,11 +1113,15 @@ const styles = StyleSheet.create({
   muscleSessions: { fontSize: 11, color: C.muted },
   planCard: {
     backgroundColor: C.card,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
+    borderRadius: 16,
+    borderWidth: 0,
     padding: 14,
     marginBottom: 12,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 5, height: 5 },
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    elevation: 6,
   },
   planCardToday: { borderColor: C.accent, borderWidth: 2 },
   planHeader: {
@@ -746,7 +1132,7 @@ const styles = StyleSheet.create({
   },
   planDay: { fontSize: 15, fontWeight: '700', color: C.text },
   todayBadge: {
-    backgroundColor: '#1E1B4B',
+    backgroundColor: C.accentDim,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -756,6 +1142,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: C.border,
     marginBottom: 10,
+    paddingTop: 4,
+  },
+  plannedMuscleHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingLeft: 4,
   },
   plannedExerciseRow: {
     flexDirection: 'row',
@@ -763,11 +1159,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
-  },
-  plannedMuscle: {
-    fontSize: 11,
-    color: C.muted,
-    marginRight: 8,
   },
   deletePlanExBtn: {
     paddingHorizontal: 8,
@@ -778,29 +1169,49 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
+  viewExBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.accent,
+    backgroundColor: C.accentDim,
+  },
+  viewExBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  // PR overlay
   prOverlay: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#000000CC',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(40,50,70,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   prCard: {
-    backgroundColor: C.surface,
-    borderRadius: 20,
+    backgroundColor: C.card,
+    borderRadius: 24,
     padding: 28,
     width: '85%',
     alignItems: 'center',
     gap: 8,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 8, height: 8 },
+    shadowOpacity: 0.95,
+    shadowRadius: 16,
+    elevation: 16,
   },
   prTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '900',
     color: C.yellow,
     textAlign: 'center',
+    letterSpacing: 0.5,
   },
   prExercise: {
     fontSize: 16,
@@ -808,7 +1219,170 @@ const styles = StyleSheet.create({
     color: C.text,
     textAlign: 'center',
   },
+  prDivider: {
+    width: '80%',
+    height: 1,
+    backgroundColor: C.border,
+    marginVertical: 4,
+  },
   prOld: { fontSize: 13, color: C.muted },
-  prNew: { fontSize: 18, fontWeight: '800', color: C.green },
-  pr1rm: { fontSize: 16, fontWeight: '700', color: C.yellow },
-});
+  prNew: { fontSize: 20, fontWeight: '800', color: C.green },
+  pr1rm: { fontSize: 16, fontWeight: '700', color: C.accent },
+}); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Neumorphic Modal Styles
+// ─────────────────────────────────────────────────────────────────────────────
+function makeNeuStyles(C: any) { return StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(40,50,70,0.35)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: C.card,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    paddingBottom: 36,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 20,
+  },
+  handle: {
+    width: 40,
+    height: 5,
+    backgroundColor: C.shadowDark,
+    borderRadius: 3,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.text,
+    marginBottom: 12,
+  },
+  // Flat option row
+  optRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  optText: {
+    fontSize: 15,
+    color: C.textSub,
+    fontWeight: '500',
+  },
+  // Grouped exercise picker
+  groupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    marginTop: 6,
+    borderLeftWidth: 3,
+    backgroundColor: C.border,
+    borderRadius: 8,
+  },
+  groupTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  groupChevron: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  exOptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  exDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 12,
+  },
+  exOptText: {
+    fontSize: 14,
+    color: C.textSub,
+  },
+  // Checkbox for multi-select
+  exCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: C.border,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.bg,
+  },
+  exCheckmark: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '900',
+  },
+  // Badge showing count of selected exercises per group
+  groupBadge: {
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    marginRight: 8,
+  },
+  groupBadgeText: {
+    fontSize: 11,
+    color: '#fff',
+    fontWeight: '800',
+  },
+  // Confirm / Add button
+  confirmBtn: {
+    marginTop: 12,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  confirmBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  // Save toast
+  toast: {
+    position: 'absolute',
+    bottom: 80,
+    alignSelf: 'center',
+    backgroundColor: C.green,
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  toastIcon: { fontSize: 16, color: '#fff', fontWeight: '900' },
+  toastText: { fontSize: 14, color: '#fff', fontWeight: '700' },
+}); }

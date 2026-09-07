@@ -4,7 +4,7 @@
     "slug": "gainquest-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/image.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "backgroundColor": "#0A0E1A"
@@ -15,13 +15,23 @@
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/image.png",
         "backgroundColor": "#0A0E1A"
       },
       "package": "com.gainquest.app"
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      "expo-sqlite",
+      "expo-status-bar",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "GainQuest needs access to your photos to save progress pics.",
+          "cameraPermission": "GainQuest needs camera access to capture your progress."
+        }
+      ]
     ],
     "scheme": "gainquest",
     "experiments": {

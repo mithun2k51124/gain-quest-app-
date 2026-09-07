@@ -1,19 +1,37 @@
+import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { View, Text } from 'react-native';
 import { Tabs } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { initializeDatabase } from '../db/database';
-import { C } from '../constants/theme';
+import { initializeDatabase, getOnboardingComplete } from '../db/database';
+import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
+import { AlertProvider } from '../contexts/AlertContext';
+import OnboardingModal from '../components/OnboardingModal';
 
 export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <AlertProvider>
+        <RootLayoutInner />
+      </AlertProvider>
+    </ThemeProvider>
+  );
+}
+
+function RootLayoutInner() {
+  const { C, isDark } = useTheme();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     try {
       initializeDatabase();
+      const done = getOnboardingComplete();
+      setShowOnboarding(!done);
       setReady(true);
     } catch (e: any) {
       setError(e.message);
@@ -22,34 +40,40 @@ export default function RootLayout() {
 
   if (error) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>DB Error: {error}</Text>
+      <View style={{ flex:1, backgroundColor: C.bg, alignItems:'center', justifyContent:'center' }}>
+        <Text style={{ fontSize: 14, color: C.red, textAlign: 'center', padding: 20 }}>DB Error: {error}</Text>
       </View>
     );
   }
 
   if (!ready) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.logo}>🏋️</Text>
-        <Text style={styles.logoText}>GainQuest</Text>
-        <Text style={styles.subText}>Loading...</Text>
+      <View style={{ flex:1, backgroundColor: C.bg, alignItems:'center', justifyContent:'center' }}>
+        <Text style={{ fontSize: 64 }}>🏋️</Text>
+        <Text style={{ fontSize: 28, fontWeight: '800', color: C.text, marginBottom: 6 }}>GainQuest</Text>
+        <Text style={{ fontSize: 14, color: C.muted }}>Loading...</Text>
       </View>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={C.bg} />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider style={{ backgroundColor: C.bg }}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Tabs
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: C.surface,
+            backgroundColor: C.bg,
             borderTopColor: C.border,
             borderTopWidth: 1,
             height: 60,
             paddingBottom: 8,
+            shadowColor: '#BFC8D6',
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.8,
+            shadowRadius: 10,
+            elevation: 12,
           },
           tabBarActiveTintColor: C.accent,
           tabBarInactiveTintColor: C.muted,
@@ -126,19 +150,13 @@ export default function RootLayout() {
           }}
         />
       </Tabs>
-    </SafeAreaProvider>
+
+      {/* First-launch onboarding — shown only once */}
+      <OnboardingModal
+        visible={showOnboarding}
+        onComplete={() => setShowOnboarding(false)}
+      />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    backgroundColor: C.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logo: { fontSize: 64, marginBottom: 12 },
-  logoText: { fontSize: 28, fontWeight: '800', color: C.text, marginBottom: 6 },
-  subText: { fontSize: 14, color: C.muted },
-  errorText: { fontSize: 14, color: C.red, textAlign: 'center', padding: 20 },
-});

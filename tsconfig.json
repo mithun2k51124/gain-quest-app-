@@ -3,7 +3,7 @@
   "compilerOptions": {
     "strict": true,
     "moduleResolution": "bundler",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": [
         "./*"

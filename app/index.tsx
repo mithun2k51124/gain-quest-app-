@@ -7,10 +7,11 @@ import {
   RefreshControl,
   TouchableOpacity,
   TextInput,
-  Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle, G } from 'react-native-svg';
+import { Ionicons } from '@expo/vector-icons';
 import {
   getTodayLog,
   getGoals,
@@ -25,10 +26,15 @@ import {
   Streak,
   WorkoutPlan,
 } from '../db/database';
-import { Card, StatCard, ProgressBar, Ring, MuscleTag, SectionHeader } from '../components/ui';
-import { C } from '../constants/theme';
+import { Card, ProgressBar, Ring, MuscleTag, SectionHeader } from '../components/ui';
+import { useTheme } from '../contexts/ThemeContext';
+import { useCustomAlert } from '../contexts/AlertContext';
 
 export default function DashboardScreen() {
+  const { showAlert } = useCustomAlert();
+
+
+  const { C } = useTheme();
   const [log, setLog] = useState<DailyLog | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
   const [streak, setStreak] = useState<Streak | null>(null);
@@ -50,13 +56,19 @@ export default function DashboardScreen() {
     setWeekly(getWeeklyStats());
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const onRefresh = () => {
     setRefresh(true);
     load();
     setRefresh(false);
   };
+
+  const styles = makeStyles(C);
 
   if (!log || !goals) return null;
 
@@ -71,19 +83,17 @@ export default function DashboardScreen() {
       const value = parseFloat(goalWater);
       if (!isNaN(value) && value > 0) next.water_goal = value;
     }
-
     if (goalProtein.trim()) {
       const value = parseFloat(goalProtein);
       if (!isNaN(value) && value > 0) next.protein_goal = value;
     }
-
     if (goalCalories.trim()) {
       const value = parseInt(goalCalories, 10);
       if (!isNaN(value) && value > 0) next.calorie_goal = value;
     }
 
     if (!Object.keys(next).length) {
-      Alert.alert('No changes', 'Enter at least one intake goal.');
+      showAlert('No changes', 'Enter at least one intake goal.');
       return;
     }
 
@@ -92,28 +102,23 @@ export default function DashboardScreen() {
     setGoalProtein('');
     setGoalCalories('');
     load();
-    Alert.alert('Saved', 'Your intake goals were updated.');
+    showAlert('Saved', 'Your intake goals were updated.');
   };
 
   const habits = [
-    { icon: '🏋️', label: 'Workout Completed', done: !!log.workout_completed },
-    { icon: '💊', label: 'Creatine Taken', done: !!log.creatine_taken },
-    { icon: '💧', label: 'Water Goal Reached', done: !!log.water_goal_reached },
-    { icon: '🥩', label: 'Protein Goal Reached', done: !!log.protein_goal_reached },
-    { icon: '😴', label: 'Slept 7+ Hours', done: !!log.slept_well },
+    { icon: 'barbell-outline', label: 'Workout', done: !!log.workout_completed },
+    { icon: 'flash-outline', label: 'Creatine', done: !!log.creatine_taken },
+    { icon: 'water-outline', label: 'Water', done: !!log.water_goal_reached },
+    { icon: 'restaurant-outline', label: 'Protein', done: !!log.protein_goal_reached },
+    { icon: 'moon-outline', label: 'Sleep', done: !!log.slept_well },
   ];
-
   const habitsDone = habits.filter(h => h.done).length;
 
   const reminders: { icon: string; msg: string; color: string }[] = [];
-
-  if (!log.creatine_taken) reminders.push({ icon: '💊', msg: 'Take your creatine', color: C.orange });
-  if (waterPct < 1) reminders.push({ icon: '💧', msg: `Water at ${Math.round(waterPct * 100)}% of goal`, color: C.water });
-  if (!log.workout_completed && plan && !plan.plan_name.toLowerCase().includes('rest')) {
-    reminders.push({ icon: '🏋️', msg: `Workout: ${plan.plan_name}`, color: C.accent });
-  }
-  if (proteinPct < 1) reminders.push({ icon: '🥩', msg: 'Hit your protein goal', color: C.protein });
-  if (!reminders.length) reminders.push({ icon: '🎉', msg: 'All goals done! Amazing work!', color: C.green });
+  if (!log.creatine_taken) reminders.push({ icon: 'flash-outline', msg: 'Take your creatine', color: C.orange });
+  if (waterPct < 1) reminders.push({ icon: 'water-outline', msg: `Water at ${Math.round(waterPct * 100)}% of goal`, color: C.water });
+  if (proteinPct < 1) reminders.push({ icon: 'restaurant-outline', msg: 'Hit your protein goal', color: C.protein });
+  if (!reminders.length) reminders.push({ icon: 'star-outline', msg: 'All goals done! Amazing work!', color: C.green });
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -128,7 +133,6 @@ export default function DashboardScreen() {
             })}
           </Text>
         </View>
-        <Text style={{ fontSize: 32 }}>🏋️</Text>
       </View>
 
       <ScrollView
@@ -136,202 +140,16 @@ export default function DashboardScreen() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
       >
-        <View style={styles.row}>
-          <StatCard
-            icon="⚖️"
-            title="Body Weight"
-            value={weight ? `${weight.toFixed(1)} kg` : '-- kg'}
-            sub={`Goal: ${goals.weight_goal} kg`}
-            color={C.water}
-          />
-          <View style={{ width: 10 }} />
-          <StatCard
-            icon="🔥"
-            title="Streak"
-            value={`${streak?.current_streak ?? 0} days`}
-            sub={`Best: ${streak?.longest_streak ?? 0}`}
-            color="#FF6B35"
-          />
-        </View>
-
-        <View style={[styles.row, { marginTop: 10 }]}>
-          <StatCard
-            icon="💊"
-            title="Creatine"
-            value={log.creatine_taken ? 'Taken' : 'Not Logged'}
-            sub={log.creatine_taken ? 'logged today' : 'tap tracker'}
-            color={log.creatine_taken ? C.green : C.red}
-          />
-          <View style={{ width: 10 }} />
-          <StatCard
-            icon="🏋️"
-            title="Workout"
-            value={log.workout_completed ? 'Done' : 'Pending'}
-            sub={plan?.plan_name ?? 'No plan set'}
-            color={log.workout_completed ? C.purple : C.muted}
-          />
-        </View>
-
-        <SectionHeader title="Intake Goals" />
-        <Card accent={C.accent}>
-          <View style={styles.goalBox}>
-            <TextInput
-              style={styles.input}
-              placeholder={`Water goal, current ${goals.water_goal} L`}
-              placeholderTextColor={C.muted}
-              keyboardType="decimal-pad"
-              value={goalWater}
-              onChangeText={setGoalWater}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={`Protein goal, current ${goals.protein_goal} g`}
-              placeholderTextColor={C.muted}
-              keyboardType="numeric"
-              value={goalProtein}
-              onChangeText={setGoalProtein}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={`Calories goal, current ${goals.calorie_goal} kcal`}
-              placeholderTextColor={C.muted}
-              keyboardType="numeric"
-              value={goalCalories}
-              onChangeText={setGoalCalories}
-            />
-            <TouchableOpacity style={styles.saveGoalBtn} onPress={saveHomeGoals}>
-              <Text style={styles.saveGoalText}>Save Intake Goals</Text>
-            </TouchableOpacity>
-          </View>
-        </Card>
-
-        <SectionHeader title="Daily Macros" />
-        <Card accent={C.water}>
-          <View style={styles.macroRow}>
-            <Ring value={waterPct} color={C.water} size={80} />
-            <View style={styles.macroInfo}>
-              <Text style={styles.macroName}>💧 Water</Text>
-              <Text style={[styles.macroVal, { color: C.water }]}>
-                {log.water_intake.toFixed(2)} / {goals.water_goal} L
-              </Text>
-              <ProgressBar value={waterPct} color={C.water} height={6} />
-              <Text style={styles.macroRem}>
-                {waterPct >= 1
-                  ? 'Goal reached!'
-                  : `${Math.max(goals.water_goal - log.water_intake, 0).toFixed(2)} L remaining`}
-              </Text>
-
-              <View style={styles.quickBtns}>
-                {[100, 250].map(ml => (
-                  <TouchableOpacity
-                    key={ml}
-                    style={[styles.quickBtn, { borderColor: C.water }]}
-                    onPress={() => {
-                      addWater(ml);
-                      load();
-                    }}
-                  >
-                    <Text style={[styles.quickBtnText, { color: C.water }]}>
-                      +{ml}ml
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-        </Card>
-
-        <Card accent={C.protein}>
-          <View style={styles.macroRow}>
-            <Ring value={proteinPct} color={C.protein} size={80} />
-            <View style={styles.macroInfo}>
-              <Text style={styles.macroName}>🥩 Protein</Text>
-              <Text style={[styles.macroVal, { color: C.protein }]}>
-                {Math.round(log.protein_intake)} / {goals.protein_goal} g
-              </Text>
-              <ProgressBar value={proteinPct} color={C.protein} height={6} />
-              <Text style={styles.macroRem}>
-                {proteinPct >= 1
-                  ? 'Goal reached!'
-                  : `${Math.max(Math.round(goals.protein_goal - log.protein_intake), 0)} g remaining`}
-              </Text>
-            </View>
-          </View>
-        </Card>
-
-        <Card accent={C.calories}>
-          <View style={styles.macroRow}>
-            <Ring value={calPct} color={C.calories} size={80} />
-            <View style={styles.macroInfo}>
-              <Text style={styles.macroName}>🔥 Calories</Text>
-              <Text style={[styles.macroVal, { color: C.calories }]}>
-                {log.calorie_intake} / {goals.calorie_goal} kcal
-              </Text>
-              <ProgressBar value={calPct} color={C.calories} height={6} />
-              <Text style={styles.macroRem}>
-                {calPct >= 1
-                  ? 'Goal reached!'
-                  : `${Math.max(goals.calorie_goal - log.calorie_intake, 0)} kcal remaining`}
-              </Text>
-            </View>
-          </View>
-        </Card>
-
-        {weekly && (
-          <>
-            <SectionHeader title="This Week" />
-            <View style={styles.row}>
-              {[
-                { icon: '🏋️', label: 'Workouts', val: String(weekly.workouts), color: C.purple },
-                { icon: '💧', label: 'Water Days', val: String(weekly.waterSuccess), color: C.water },
-                { icon: '💊', label: 'Creatine', val: String(weekly.creatineTaken), color: C.green },
-              ].map((s, i) => (
-                <View key={s.label} style={[styles.quickStat, i === 1 && { marginHorizontal: 8 }]}>
-                  <Text style={{ fontSize: 22 }}>{s.icon}</Text>
-                  <Text style={[styles.quickVal, { color: s.color }]}>{s.val}</Text>
-                  <Text style={styles.quickLabel}>{s.label}</Text>
-                </View>
-              ))}
-            </View>
-          </>
-        )}
-
-        <SectionHeader title="Today's Habits" />
-        <Card accent={C.green}>
-          <View style={{ padding: 14 }}>
-            {habits.map((h, i) => (
-              <View key={i} style={[styles.habitRow, h.done && styles.habitRowDone]}>
-                <Text style={styles.habitText}>{h.icon}  {h.label}</Text>
-                <Text style={{ color: h.done ? C.green : C.muted, fontWeight: '700' }}>
-                  {h.done ? '✓' : '○'}
-                </Text>
-              </View>
-            ))}
-            <Text style={styles.habitCount}>{habitsDone} / {habits.length} complete</Text>
-            <ProgressBar value={habitsDone / habits.length} color={C.green} height={8} />
-          </View>
-        </Card>
-
-        <SectionHeader title="Reminders" />
-        <Card accent={C.accent}>
-          <View style={{ padding: 14 }}>
-            {reminders.map((r, i) => (
-              <View key={i} style={styles.reminderPill}>
-                <View style={[styles.reminderStrip, { backgroundColor: r.color }]} />
-                <Text style={[styles.reminderText, { color: r.color }]}>
-                  {r.icon}  {r.msg}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </Card>
-
+        {/* 1. TODAY'S WORKOUT */}
         {plan && (
-          <>
+          <View style={styles.section}>
             <SectionHeader title="Today's Workout" />
             <Card accent={C.purple}>
-              <View style={styles.workoutBody}>
-                <View style={{ flex: 1 }}>
+              <View style={styles.workoutRow}>
+                <View style={styles.workoutIconWrap}>
+                  <Ionicons name="barbell-outline" size={24} color={C.purple} />
+                </View>
+                <View style={{ flex: 1, paddingLeft: 12 }}>
                   <Text style={styles.workoutName}>{plan.plan_name}</Text>
                   <View style={styles.mgRow}>
                     {plan.muscle_groups
@@ -346,7 +164,7 @@ export default function DashboardScreen() {
                 <View
                   style={[
                     styles.statusBadge,
-                    { backgroundColor: log.workout_completed ? '#091509' : '#12102A' },
+                    { backgroundColor: log.workout_completed ? C.greenDim : C.accentDim },
                   ]}
                 >
                   <Text
@@ -356,19 +174,250 @@ export default function DashboardScreen() {
                       fontSize: 12,
                     }}
                   >
-                    {log.workout_completed ? 'Done' : 'Pending'}
+                    {log.workout_completed ? '✓ Completed' : 'Pending'}
                   </Text>
                 </View>
               </View>
             </Card>
-          </>
+          </View>
         )}
+
+        {/* 2. OVERVIEW */}
+        <View style={styles.section}>
+          <SectionHeader title="Overview" />
+          <View style={styles.overviewGrid}>
+            <OverviewCard
+              icon="flame-outline"
+              title="Streak"
+              val={`${streak?.current_streak ?? 0} days`}
+              sub={`Best: ${streak?.longest_streak ?? 0}`}
+              color="#FF6B35"
+            />
+            <OverviewCard
+              icon="flash-outline"
+              title="Creatine"
+              val={log.creatine_taken ? 'Taken' : 'Not Logged'}
+              sub={log.creatine_taken ? 'Logged today' : 'Tap to log'}
+              color={log.creatine_taken ? C.green : C.red}
+            />
+            <OverviewCard
+              icon="barbell-outline"
+              title="Workout"
+              val={log.workout_completed ? 'Done' : 'Pending'}
+              sub={log.workout_completed ? 'Nice job!' : 'Waiting...'}
+              color={log.workout_completed ? C.purple : C.muted}
+            />
+            <OverviewCard
+              icon="scale-outline"
+              title="Body Weight"
+              val={weight ? `${weight.toFixed(1)} kg` : '-- kg'}
+              sub={`Goal: ${goals.weight_goal} kg`}
+              color={C.water}
+            />
+          </View>
+        </View>
+
+        {/* 3. INTAKE GOALS */}
+        <View style={styles.section}>
+          <SectionHeader title="Intake Goals" />
+          <Card>
+            <View style={styles.intakeContainer}>
+              {/* Left Column - Progress */}
+              <View style={styles.intakeLeft}>
+                <MacroProgress
+                  icon="water-outline"
+                  name="Water"
+                  val={`${log.water_intake.toFixed(2)} / ${goals.water_goal} L`}
+                  pct={waterPct}
+                  color={C.water}
+                />
+                <View style={styles.divider} />
+                <MacroProgress
+                  icon="restaurant-outline"
+                  name="Protein"
+                  val={`${Math.round(log.protein_intake)} / ${goals.protein_goal} g`}
+                  pct={proteinPct}
+                  color={C.protein}
+                />
+                <View style={styles.divider} />
+                <MacroProgress
+                  icon="flame-outline"
+                  name="Calories"
+                  val={`${log.calorie_intake} / ${goals.calorie_goal} kcal`}
+                  pct={calPct}
+                  color={C.calories}
+                />
+              </View>
+
+              {/* Right Column - Inputs */}
+              <View style={styles.intakeRight}>
+                <TextInput
+                  style={styles.intakeInput}
+                  placeholder={`Water: ${goals.water_goal} L`}
+                  placeholderTextColor={C.muted}
+                  keyboardType="decimal-pad"
+                  value={goalWater}
+                  onChangeText={setGoalWater}
+                />
+                <TextInput
+                  style={styles.intakeInput}
+                  placeholder={`Protein: ${goals.protein_goal} g`}
+                  placeholderTextColor={C.muted}
+                  keyboardType="numeric"
+                  value={goalProtein}
+                  onChangeText={setGoalProtein}
+                />
+                <TextInput
+                  style={styles.intakeInput}
+                  placeholder={`Calories: ${goals.calorie_goal} kcal`}
+                  placeholderTextColor={C.muted}
+                  keyboardType="numeric"
+                  value={goalCalories}
+                  onChangeText={setGoalCalories}
+                />
+                <TouchableOpacity style={styles.saveBtn} onPress={saveHomeGoals}>
+                  <Text style={styles.saveBtnText}>Save Goals</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Card>
+        </View>
+
+        {/* 4. THIS WEEK & TODAY'S HABITS */}
+        <View style={styles.twoColSection}>
+          <View style={styles.colLeft}>
+            <SectionHeader title="This Week" />
+            <Card style={{ flex: 1 }}>
+              <View style={[styles.weekStatsBox, { flex: 1, justifyContent: 'space-evenly' }]}>
+                <View style={styles.weekStatItem}>
+                  <Ionicons name="trophy-outline" size={24} color={C.purple} style={styles.weekStatIcon} />
+                  <Text style={[styles.weekStatVal, { color: C.purple }]}>{weekly?.workouts || 0}</Text>
+                  <Text style={styles.weekStatLbl}>Workouts</Text>
+                </View>
+                <View style={styles.weekStatItem}>
+                  <Ionicons name="water-outline" size={24} color={C.water} style={styles.weekStatIcon} />
+                  <Text style={[styles.weekStatVal, { color: C.water }]}>{weekly?.waterSuccess || 0}</Text>
+                  <Text style={styles.weekStatLbl}>Water Days</Text>
+                </View>
+                <View style={styles.weekStatItem}>
+                  <Ionicons name="flash-outline" size={24} color={C.green} style={styles.weekStatIcon} />
+                  <Text style={[styles.weekStatVal, { color: C.green }]}>{weekly?.creatineTaken || 0}</Text>
+                  <Text style={styles.weekStatLbl}>Creatine</Text>
+                </View>
+              </View>
+            </Card>
+          </View>
+
+          <View style={styles.colRight}>
+            <SectionHeader title="Today's Habits" />
+            <Card style={{ flex: 1 }}>
+              <View style={[styles.habitsBox, { flex: 1, justifyContent: 'space-between' }]}>
+                <View>
+                  {habits.map((h, i) => (
+                    <View key={i} style={styles.habitRow}>
+                      <View style={styles.habitIconWrap}>
+                        <Ionicons name={h.icon as any} size={16} color={C.muted} />
+                      </View>
+                      <Text style={styles.habitLabel}>{h.label}</Text>
+                      <Text style={{ color: h.done ? C.green : C.muted, fontWeight: '800' }}>
+                        {h.done ? '✓' : '○'}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.habitProgressBox}>
+                  <Text style={styles.habitProgressTxt}>{habitsDone} / {habits.length} Complete</Text>
+                  <ProgressBar value={habitsDone / habits.length} color={C.green} height={6} />
+                </View>
+              </View>
+            </Card>
+          </View>
+        </View>
+
+        {/* 5. REMINDERS */}
+        <View style={styles.section}>
+          <SectionHeader title="Reminders" />
+          <View style={styles.remindersGrid}>
+            {reminders.map((r, i) => (
+              <View key={i} style={[styles.reminderPill, { borderColor: r.color }]}>
+                <Ionicons name={r.icon as any} size={16} color={r.color} style={{ marginRight: 8 }} />
+                <Text style={[styles.reminderTxt, { color: r.color }]}>{r.msg}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+// ─────────────────────────────────────────────────────────────────────────────
+// Subcomponents for the new layout
+// ─────────────────────────────────────────────────────────────────────────────
+function OverviewCard({ icon, title, val, sub, color }: any) {
+  const { showAlert } = useCustomAlert();
+
+  const { C } = useTheme();
+  const styles = makeStyles(C);
+  return (
+    <View style={styles.ovCardWrap}>
+      <Card accent={color}>
+        <View style={styles.ovCard}>
+          <View style={[styles.ovIconBox, { backgroundColor: color + '15' }]}>
+            <Ionicons name={icon} size={20} color={color} />
+          </View>
+          <Text style={styles.ovTitle} numberOfLines={1}>{title}</Text>
+          <Text style={[styles.ovVal, { color }]} numberOfLines={1}>{val}</Text>
+          <Text style={styles.ovSub} numberOfLines={1}>{sub}</Text>
+        </View>
+      </Card>
+    </View>
+  );
+}
+
+function MacroProgress({ icon, name, val, pct, color }: any) {
+  const { showAlert } = useCustomAlert();
+
+  const { C } = useTheme();
+  const styles = makeStyles(C);
+  const size = 44;
+  const strokeW = 4;
+  const r = (size - strokeW) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (circ * Math.min(Math.max(pct, 0), 1));
+
+  return (
+    <View style={styles.macroProgressRow}>
+      <View style={styles.macroIconWrap}>
+        <Ionicons name={icon} size={24} color={color} />
+      </View>
+      <View style={{ flex: 1, paddingHorizontal: 12 }}>
+        <Text style={styles.macroName}>{name}</Text>
+        <Text style={[styles.macroValTxt, { color }]}>{val}</Text>
+        <View style={{ marginTop: 4 }}>
+          <ProgressBar value={pct} color={color} height={6} />
+        </View>
+      </View>
+      <View style={styles.macroRingBox}>
+        <Svg width={size} height={size}>
+          <G rotation="-90" origin={`${size/2},${size/2}`}>
+            <Circle cx={size/2} cy={size/2} r={r} stroke={C.shadowDark} strokeWidth={strokeW} fill="none" />
+            <Circle cx={size/2} cy={size/2} r={r} stroke={color} strokeWidth={strokeW} fill="none" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" />
+          </G>
+        </Svg>
+        <View style={styles.macroRingCenter}>
+          <Text style={[styles.macroRingTxt, { color }]}>{Math.round(pct * 100)}%</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
+function makeStyles(C: any) { return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row',
@@ -376,91 +425,105 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: C.surface,
+    backgroundColor: C.bg,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
   headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
   headerDate: { fontSize: 12, color: C.muted, marginTop: 2 },
-  scroll: { padding: 16, paddingBottom: 32 },
-  row: { flexDirection: 'row' },
-  goalBox: { padding: 16 },
-  input: {
-    backgroundColor: C.card,
-    borderRadius: 10,
+  scroll: { padding: 16, paddingBottom: 40 },
+  section: { marginBottom: 20 },
+
+  // Workout
+  workoutRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
+  workoutIconWrap: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: C.purple + '22',
+    alignItems: 'center', justifyContent: 'center'
+  },
+  workoutName: { fontSize: 16, fontWeight: '800', color: C.purple, marginBottom: 6 },
+  mgRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  statusBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+
+  // Overview
+  overviewGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  ovCardWrap: { width: '48%', marginBottom: 16 },
+  ovCard: { padding: 14, alignItems: 'center', width: '100%' },
+  ovIconBox: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  ovTitle: { fontSize: 11, color: C.muted, fontWeight: '700', marginBottom: 6, textAlign: 'center' },
+  ovVal: { fontSize: 15, fontWeight: '800', marginBottom: 4, textAlign: 'center' },
+  ovSub: { fontSize: 10, color: C.textSub, textAlign: 'center' },
+
+  // Intake Goals
+  intakeContainer: { flexDirection: 'row', minHeight: 220 },
+  intakeLeft: { flex: 1.3, paddingVertical: 16, paddingLeft: 16, paddingRight: 8 },
+  intakeRight: { flex: 1, backgroundColor: C.surface, padding: 16, borderLeftWidth: 1, borderLeftColor: C.border, justifyContent: 'center' },
+  divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
+  macroProgressRow: { flexDirection: 'row', alignItems: 'center' },
+  macroIconWrap: { width: 32, alignItems: 'center' },
+  macroName: { fontSize: 12, fontWeight: '700', color: C.text, marginBottom: 2 },
+  macroValTxt: { fontSize: 11, fontWeight: '700' },
+  macroRingBox: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+  macroRingCenter: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  macroRingTxt: { fontSize: 11, fontWeight: '800' },
+  intakeInput: {
+    backgroundColor: C.bg,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: C.border,
     color: C.text,
-    padding: 12,
-    fontSize: 14,
-    marginBottom: 8,
+    padding: 10,
+    fontSize: 11,
+    marginBottom: 12,
   },
-  saveGoalBtn: {
+  saveBtn: {
     backgroundColor: C.accent,
-    borderRadius: 10,
-    paddingVertical: 14,
+    borderRadius: 8,
+    paddingVertical: 12,
     alignItems: 'center',
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 2, height: 2 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  saveGoalText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  macroRow: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16 },
-  macroInfo: { flex: 1, gap: 6 },
-  macroName: { fontSize: 14, fontWeight: '700', color: C.text },
-  macroVal: { fontSize: 16, fontWeight: '700' },
-  macroRem: { fontSize: 11, color: C.muted },
-  quickBtns: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-  },
-  quickBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  quickBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  quickStat: {
-    flex: 1,
-    backgroundColor: C.card,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    alignItems: 'center',
-    padding: 16,
-  },
-  quickVal: { fontSize: 26, fontWeight: '800', marginTop: 4 },
-  quickLabel: { fontSize: 11, color: C.muted, marginTop: 2 },
-  habitRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
-  habitRowDone: { backgroundColor: '#091509', borderRadius: 8, paddingHorizontal: 8 },
-  habitText: { fontSize: 13, color: C.textSub },
-  habitCount: { fontSize: 12, color: C.muted, marginTop: 12, marginBottom: 8 },
+  saveBtnText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+
+  // Two Column Layout
+  twoColSection: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  colLeft: { flex: 1 },
+  colRight: { flex: 1.2 },
+
+  // This Week
+  weekStatsBox: { padding: 16, gap: 16, alignItems: 'center' },
+  weekStatItem: { alignItems: 'center' },
+  weekStatIcon: { marginBottom: 4 },
+  weekStatVal: { fontSize: 22, fontWeight: '800' },
+  weekStatLbl: { fontSize: 10, color: C.muted, fontWeight: '600', marginTop: 2 },
+
+  // Habits
+  habitsBox: { padding: 16 },
+  habitRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  habitIconWrap: { width: 20, marginRight: 8, alignItems: 'center' },
+  habitLabel: { flex: 1, fontSize: 11, color: C.textSub, fontWeight: '600' },
+  habitProgressBox: { marginTop: 8, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
+  habitProgressTxt: { fontSize: 10, color: C.muted, marginBottom: 6, fontWeight: '600' },
+
+  // Reminders
+  remindersGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   reminderPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.surface,
-    borderRadius: 10,
-    marginBottom: 8,
-    overflow: 'hidden',
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 2, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  reminderStrip: { width: 4, alignSelf: 'stretch' },
-  reminderText: { flex: 1, fontSize: 13, padding: 12 },
-  workoutBody: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
-  workoutName: { fontSize: 20, fontWeight: '800', color: '#CE93D8', marginBottom: 8 },
-  mgRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  statusBadge: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 },
-});
+  reminderTxt: { fontSize: 12, fontWeight: '700' },
+}); }

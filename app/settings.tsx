@@ -1,15 +1,15 @@
-// app/settings.tsx — Settings Screen
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, Alert, RefreshControl,
+  View, Text, ScrollView, StyleSheet, RefreshControl,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  getGoals, updateGoals, getSetting, setSetting, Goals,
+  getGoals, updateGoals, getSetting, setSetting, Goals, resetDatabase,
 } from '../db/database';
 import { Card, SectionHeader, Btn, SelectBtn, PickerModal, Toggle } from '../components/ui';
-import { C } from '../constants/theme';
+import { useTheme } from '../contexts/ThemeContext';
+import { useCustomAlert } from '../contexts/AlertContext';
 
 // Option generators
 const range = (start: number, end: number, step = 1) => {
@@ -27,8 +27,11 @@ const CREAT_OPTS   = ['3','3.5','4','4.5','5','5.5','6','7','8','10'].map(v => (
 type ModalKey = 'water'|'protein'|'calories'|'weight'|'creatine'|null;
 
 export default function SettingsScreen() {
+  const { showAlert } = useCustomAlert();
+
+
+  const { C, isDark, toggleDark } = useTheme();
   const [goals,    setGoals]    = useState<Goals | null>(null);
-  const [darkMode, setDarkMode] = useState(true);
   const [name,     setNameVal]  = useState('Athlete');
   const [modal,    setModal]    = useState<ModalKey>(null);
   const [refresh,  setRefresh]  = useState(false);
@@ -40,12 +43,17 @@ export default function SettingsScreen() {
     const g = getGoals();
     setGoals(g);
     setPending({});
-    setDarkMode(getSetting('dark_mode', 'true') === 'true');
     setNameVal(getSetting('name', 'Athlete'));
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
   const onRefresh = () => { setRefresh(true); load(); setRefresh(false); };
+
+  const styles = makeStyles(C);
 
   if (!goals) return null;
 
@@ -57,14 +65,32 @@ export default function SettingsScreen() {
 
   const saveGoals = () => {
     if (!Object.keys(pending).length) {
-      Alert.alert('No changes', 'Adjust a goal first.');
+      showAlert('No changes', 'Adjust a goal first.');
       return;
     }
     updateGoals(pending);
     setSetting('name', name);
-    setSetting('dark_mode', darkMode ? 'true' : 'false');
     load();
-    Alert.alert('Saved ✓', 'Your goals have been updated!');
+    showAlert('Saved ✓', 'Your goals have been updated!');
+  };
+
+  const handleResetData = () => {
+    showAlert(
+      'Reset All Data?',
+      'This will permanently delete all daily logs, workout history, PRs, weight entries, and reset goals back to clean defaults. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset Everything',
+          style: 'destructive',
+          onPress: () => {
+            resetDatabase();
+            load();
+            showAlert('App Reset ✓', 'All entries and logs have been reset.');
+          },
+        },
+      ]
+    );
   };
 
   const modalOptions: Record<NonNullable<ModalKey>, { opts: {label:string;value:string}[]; key: keyof Goals }> = {
@@ -87,28 +113,33 @@ export default function SettingsScreen() {
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}>
 
         {/* ── Goals ────────────────────────────────────────────────────── */}
-        <SectionHeader title="🎯 Daily Goals" />
+        <SectionHeader title="Daily Goals" icon="locate-outline" />
         <Card accent={C.accent}>
           <View style={styles.section}>
-            <SelectBtn label="💧 Water Goal"
+            <SelectBtn label="Water Goal"
               value={`${merged.water_goal} L / day`}
               color={C.water}
+              icon="water-outline"
               onPress={() => setModal('water')} />
-            <SelectBtn label="🥩 Protein Goal"
+            <SelectBtn label="Protein Goal"
               value={`${merged.protein_goal} g / day`}
               color={C.protein}
+              icon="restaurant-outline"
               onPress={() => setModal('protein')} />
-            <SelectBtn label="🔥 Calorie Goal"
+            <SelectBtn label="Calorie Goal"
               value={`${merged.calorie_goal} kcal / day`}
               color={C.calories}
+              icon="flame-outline"
               onPress={() => setModal('calories')} />
-            <SelectBtn label="⚖️ Weight Goal"
+            <SelectBtn label="Weight Goal"
               value={`${merged.weight_goal} kg`}
               color={C.water}
+              icon="scale-outline"
               onPress={() => setModal('weight')} />
-            <SelectBtn label="💊 Creatine Dose"
+            <SelectBtn label="Creatine Dose"
               value={`${merged.creatine_dose} g / day`}
               color={C.green}
+              icon="flash-outline"
               onPress={() => setModal('creatine')} />
 
             {Object.keys(pending).length > 0 && (
@@ -119,56 +150,41 @@ export default function SettingsScreen() {
               </View>
             )}
 
-            <Btn label="💾  Save Goals" color={C.accent} onPress={saveGoals} />
+            <Btn label="Save Goals" icon="save-outline" color={C.accent} onPress={saveGoals} />
           </View>
         </Card>
 
         {/* ── Preferences ──────────────────────────────────────────────── */}
-        <SectionHeader title="⚙️ Preferences" />
+        <SectionHeader title="Preferences" icon="settings-outline" />
         <Card accent="#607D8B">
           <View style={styles.section}>
             <View style={styles.prefRow}>
               <View>
                 <Text style={styles.prefLabel}>Dark Mode</Text>
-                <Text style={styles.prefSub}>Always on for best experience</Text>
+                <Text style={styles.prefSub}>Switch between light and dark themes</Text>
               </View>
-              <Toggle value={darkMode} onToggle={() => setDarkMode(v => !v)} />
+              <Toggle value={isDark} onToggle={toggleDark} />
             </View>
           </View>
         </Card>
 
-        {/* ── About ────────────────────────────────────────────────────── */}
-        <SectionHeader title="ℹ️ About" />
-        <Card accent="#607D8B">
-          <View style={styles.section}>
-            {[
-              { label: 'App', value: 'GainQuest Mobile' },
-              { label: 'Version', value: '1.0.0' },
-              { label: 'Framework', value: 'React Native + Expo' },
-              { label: 'Database', value: 'SQLite (local)' },
-              { label: 'Charts', value: 'Victory Native' },
-              { label: 'Original', value: 'Python + CustomTkinter' },
-            ].map(({ label, value }) => (
-              <View key={label} style={styles.aboutRow}>
-                <Text style={styles.aboutLabel}>{label}</Text>
-                <Text style={styles.aboutValue}>{value}</Text>
-              </View>
-            ))}
-            <Text style={styles.privacyNote}>
-              All data is stored locally on your device.{'\n'}
-              No internet connection required. No data is ever sent anywhere.
-            </Text>
-          </View>
-        </Card>
+        
 
         {/* ── Danger Zone ──────────────────────────────────────────────── */}
-        <SectionHeader title="⚠️ Data" />
+        <SectionHeader title="Danger Zone" icon="warning-outline" />
         <Card accent={C.red}>
           <View style={styles.section}>
             <Text style={styles.dangerText}>
-              Your data is stored in a local SQLite database on this device.
-              Uninstalling the app will delete all data permanently.
+              Resetting will permanently erase all workout sessions, exercises, daily logs, food and water records, PRs, and custom goals back to fresh start.
             </Text>
+            <View style={{ marginTop: 16 }}>
+              <Btn
+                label="Reset All App Data"
+                icon="trash-outline"
+                color={C.red}
+                onPress={handleResetData}
+              />
+            </View>
           </View>
         </Card>
 
@@ -192,20 +208,20 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(C: any) { return StyleSheet.create({
   safe:         { flex: 1, backgroundColor: C.bg },
-  header:       { paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
+  header:       { paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border },
   headerTitle:  { fontSize: 22, fontWeight: '800', color: C.text },
   scroll:       { padding: 16, paddingBottom: 40 },
   section:      { padding: 16 },
   prefRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
   prefLabel:    { fontSize: 14, color: C.text, fontWeight: '600' },
   prefSub:      { fontSize: 11, color: C.muted, marginTop: 2 },
-  pendingBanner:{ backgroundColor: C.accentDim, borderRadius: 10, padding: 10, marginBottom: 12, alignItems: 'center' },
+  pendingBanner:{ backgroundColor: C.accentDim, borderRadius: 12, padding: 10, marginBottom: 12, alignItems: 'center' },
   pendingText:  { color: C.accent, fontSize: 13, fontWeight: '700' },
   aboutRow:     { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.border },
   aboutLabel:   { fontSize: 13, color: C.muted },
   aboutValue:   { fontSize: 13, color: C.textSub, fontWeight: '600' },
   privacyNote:  { fontSize: 12, color: C.muted, textAlign: 'center', marginTop: 16, lineHeight: 18 },
   dangerText:   { fontSize: 13, color: C.muted, lineHeight: 20 },
-});
+}); }

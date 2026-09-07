@@ -5,12 +5,12 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   TextInput,
   RefreshControl,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import {
   getTodayLog,
   getGoals,
@@ -29,15 +29,22 @@ import {
   FoodEntry,
 } from '../db/database';
 import { Card, Btn, ProgressBar, Ring, Toggle, PickerModal, SectionHeader } from '../components/ui';
-import { C, WATER_OPTIONS, FOOD_DB } from '../constants/theme';
+import { useTheme } from '../contexts/ThemeContext';
+import { useCustomAlert } from '../contexts/AlertContext';
+import { WATER_OPTIONS, FOOD_DB } from '../constants/theme';
 
 export default function TrackerScreen() {
+  const { showAlert } = useCustomAlert();
+
+
+  const { C } = useTheme();
   const [log, setLog] = useState<DailyLog | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
   const [foods, setFoods] = useState<FoodEntry[]>([]);
   const [refresh, setRefresh] = useState(false);
 
   const [waterModal, setWaterModal] = useState(false);
+  const [lastWaterAdd, setLastWaterAdd] = useState(0);
   const [foodModal, setFoodModal] = useState(false);
 
   const [showCustom, setShowCustom] = useState(false);
@@ -51,13 +58,19 @@ export default function TrackerScreen() {
     setFoods(getFoodLog());
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const onRefresh = () => {
     setRefresh(true);
     load();
     setRefresh(false);
   };
+
+  const styles = makeStyles(C);
 
   if (!log || !goals) return null;
 
@@ -69,21 +82,18 @@ export default function TrackerScreen() {
     const ml = parseInt(mlStr, 10);
     if (!ml || isNaN(ml)) return;
     addWater(ml);
+    setLastWaterAdd(ml);
     load();
   };
 
-  const handleResetWater = () => {
-    Alert.alert('Reset Water', "Reset today's water to 0?", [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Reset',
-        style: 'destructive',
-        onPress: () => {
-          resetWater();
-          load();
-        },
-      },
-    ]);
+  const handleUndoWater = () => {
+    if (lastWaterAdd > 0) {
+      addWater(-lastWaterAdd);
+      setLastWaterAdd(0);
+      load();
+    } else {
+      showAlert('Undo', 'No recent water entry to undo.');
+    }
   };
 
   const handleAddFood = (foodKey: string) => {
@@ -99,7 +109,7 @@ export default function TrackerScreen() {
 
   const handleAddCustomFood = () => {
     if (!customName.trim()) {
-      Alert.alert('Error', 'Enter a food name.');
+      showAlert('Error', 'Enter a food name.');
       return;
     }
 
@@ -151,7 +161,7 @@ export default function TrackerScreen() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
       >
-        <SectionHeader title="💧 Water Intake" />
+        <SectionHeader title="Water Intake" icon="water-outline" />
         <Card accent={C.water}>
           <View style={styles.section}>
             <View style={styles.macroTopRow}>
@@ -172,6 +182,7 @@ export default function TrackerScreen() {
                   style={[styles.quickBtn, { borderColor: C.water }]}
                   onPress={() => {
                     addWater(ml);
+                    setLastWaterAdd(ml);
                     load();
                   }}
                 >
@@ -190,19 +201,26 @@ export default function TrackerScreen() {
                   onPress={() => setWaterModal(true)}
                 />
               </View>
-              <Btn
-                label="Reset"
-                color={C.surface}
-                textColor={C.muted}
-                outline
-                onPress={handleResetWater}
-                small
-              />
+              <TouchableOpacity
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 14,
+                  backgroundColor: C.surface,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  justifyContent: 'center',
+                  alignItems: 'center'
+                }}
+                onPress={handleUndoWater}
+              >
+                <Ionicons name="arrow-undo" size={20} color={C.muted} />
+              </TouchableOpacity>
             </View>
           </View>
         </Card>
 
-        <SectionHeader title="🥗 Nutrition" />
+        <SectionHeader title="Nutrition" icon="restaurant-outline" />
         <Card accent={C.protein}>
           <View style={styles.section}>
             <View style={styles.nutritionStats}>
@@ -303,7 +321,7 @@ export default function TrackerScreen() {
           </View>
         </Card>
 
-        <SectionHeader title="💊 Creatine" />
+        <SectionHeader title="Creatine" icon="flash-outline" />
         <Card accent={log.creatine_taken ? C.green : C.red}>
           <View style={styles.section}>
             <TouchableOpacity
@@ -311,12 +329,12 @@ export default function TrackerScreen() {
                 styles.creatineBtn,
                 {
                   borderColor: log.creatine_taken ? C.green : C.border,
-                  backgroundColor: log.creatine_taken ? '#0A2010' : C.surface,
+                  backgroundColor: log.creatine_taken ? C.greenDim : C.bg,
                 },
               ]}
               onPress={() => toggleHabit('creatine_taken')}
             >
-              <Text style={{ fontSize: 32, marginBottom: 6 }}>💊</Text>
+              <Ionicons name="flash-outline" size={32} color={log.creatine_taken ? C.green : C.muted} style={{ marginBottom: 6 }} />
               <Text
                 style={[
                   styles.creatineBtnText,
@@ -338,14 +356,14 @@ export default function TrackerScreen() {
           </View>
         </Card>
 
-        <SectionHeader title="✅ Daily Habits" />
+        <SectionHeader title="Daily Habits" icon="checkmark-circle-outline" />
         <Card accent={C.accent}>
           <View style={styles.section}>
             {([
-              ['workout_completed', '🏋️', 'Workout Completed'],
-              ['water_goal_reached', '💧', 'Water Goal Reached'],
-              ['protein_goal_reached', '🥩', 'Protein Goal Reached'],
-              ['slept_well', '😴', 'Slept 7+ Hours'],
+              ['workout_completed', 'barbell-outline', 'Workout Completed'],
+              ['water_goal_reached', 'water-outline', 'Water Goal Reached'],
+              ['protein_goal_reached', 'restaurant-outline', 'Protein Goal Reached'],
+              ['slept_well', 'moon-outline', 'Slept 7+ Hours'],
             ] as [keyof DailyLog, string, string][]).map(([key, icon, label]) => (
               <View
                 key={key}
@@ -354,7 +372,10 @@ export default function TrackerScreen() {
                   !!(log as any)[key] && styles.habitRowDone,
                 ]}
               >
-                <Text style={styles.habitText}>{icon}  {label}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name={icon as any} size={20} color={C.muted} style={{ marginRight: 10 }} />
+                  <Text style={styles.habitText}>{label}</Text>
+                </View>
                 <Toggle value={!!(log as any)[key]} onToggle={() => toggleHabit(key)} />
               </View>
             ))}
@@ -394,7 +415,7 @@ export default function TrackerScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(C: any) { return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row',
@@ -402,7 +423,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: C.surface,
+    backgroundColor: C.bg,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
@@ -416,10 +437,15 @@ const styles = StyleSheet.create({
   quickBtns: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   quickBtn: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: 10,
+    backgroundColor: C.card,
+    borderRadius: 12,
     paddingVertical: 10,
     alignItems: 'center',
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 4,
   },
   quickBtnText: { fontSize: 13, fontWeight: '700' },
   btnRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
@@ -432,21 +458,30 @@ const styles = StyleSheet.create({
   nutritionVal: { fontSize: 18, fontWeight: '800' },
   nutritionLabel: { fontSize: 11, color: C.muted },
   customForm: {
-    backgroundColor: C.surface,
-    borderRadius: 12,
+    backgroundColor: C.card,
+    borderRadius: 16,
     padding: 14,
     marginTop: 12,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 5,
   },
   customTitle: { fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 10 },
   input: {
-    backgroundColor: C.card,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.border,
+    backgroundColor: C.bg,
+    borderRadius: 12,
+    borderWidth: 0,
     color: C.text,
     padding: 12,
     fontSize: 14,
-    marginBottom: 8,
+    marginBottom: 10,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 4,
   },
   foodList: { marginTop: 12, borderTopWidth: 1, borderTopColor: C.border },
   foodRow: {
@@ -461,9 +496,15 @@ const styles = StyleSheet.create({
   deleteBtn: { padding: 8 },
   creatineBtn: {
     alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 2,
+    borderRadius: 20,
+    borderWidth: 0,
     paddingVertical: 24,
+    backgroundColor: C.card,
+    shadowColor: '#BFC8D6',
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 0.9,
+    shadowRadius: 12,
+    elevation: 8,
   },
   creatineBtnText: { fontSize: 16, fontWeight: '700' },
   creatineTime: { fontSize: 11, color: C.muted, marginTop: 4 },
@@ -476,9 +517,9 @@ const styles = StyleSheet.create({
     borderBottomColor: C.border,
   },
   habitRowDone: {
-    backgroundColor: '#091509',
-    borderRadius: 8,
+    backgroundColor: C.greenDim,
+    borderRadius: 10,
     paddingHorizontal: 10,
   },
   habitText: { fontSize: 14, color: C.textSub },
-});
+}); }

@@ -24,22 +24,6 @@ function getDb(): DbLike {
 
 export function initializeDatabase(): void {
   const db = getDb();
-db.execSync(`
-    DROP TABLE IF EXISTS settings;
-    DROP TABLE IF EXISTS goals;
-    DROP TABLE IF EXISTS daily_logs;
-    DROP TABLE IF EXISTS food_log;
-    DROP TABLE IF EXISTS water_log;
-    DROP TABLE IF EXISTS workout_plans;
-    DROP TABLE IF EXISTS workout_plan_exercises;
-    DROP TABLE IF EXISTS workout_sessions;
-    DROP TABLE IF EXISTS exercise_logs;
-    DROP TABLE IF EXISTS personal_records;
-    DROP TABLE IF EXISTS pr_history;
-    DROP TABLE IF EXISTS weight_history;
-    DROP TABLE IF EXISTS muscle_tracker;
-    DROP TABLE IF EXISTS streaks;
-  `);
   db.execSync(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
@@ -174,13 +158,20 @@ db.execSync(`
       longest_streak INTEGER DEFAULT 0,
       last_updated TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS progress_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_date TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const goalCount = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM goals');
   if (!goalCount || goalCount.c === 0) {
     db.execSync(`
       INSERT INTO goals (water_goal, protein_goal, calorie_goal, weight_goal, creatine_dose)
-      VALUES (3.0, 120.0, 2800, 75.0, 5.0);
+      VALUES (0.0, 0.0, 0, 0.0, 0.0);
     `);
   }
 
@@ -213,14 +204,21 @@ db.execSync(`
 
   db.execSync(`
     INSERT OR IGNORE INTO settings (key, value) VALUES
-    ('dark_mode', 'true'),
-    ('name', 'Athlete'),
-    ('weight_unit', 'kg');
+    ('dark_mode', 'false'),
+    ('name', ''),
+    ('age', ''),
+    ('body_weight', ''),
+    ('weight_unit', 'kg'),
+    ('onboarding_complete', 'false');
   `);
 }
 
 export function todayStr(): string {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function calculate1RM(weight: number, reps: number): number {
@@ -241,12 +239,21 @@ export function getGoals(): Goals {
   return getDb().getFirstSync<Goals>('SELECT * FROM goals ORDER BY id DESC LIMIT 1') ||
   {
     id: 1,
-    water_goal: 3,
-    protein_goal: 120,
-    calorie_goal: 2800,
-    weight_goal: 75,
-    creatine_dose: 5,
+    water_goal: 0,
+    protein_goal: 0,
+    calorie_goal: 0,
+    weight_goal: 0,
+    creatine_dose: 0,
   };
+}
+
+export function getOnboardingComplete(): boolean {
+  const r = getDb().getFirstSync<{ value: string }>('SELECT value FROM settings WHERE key=?', ['onboarding_complete']);
+  return r ? r.value === 'true' : false;
+}
+
+export function setOnboardingComplete(): void {
+  getDb().runSync('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['onboarding_complete', 'true']);
 }
 
 export function updateGoals(g: Partial<Goals>): void {
@@ -519,6 +526,56 @@ export function getExerciseHistory(exerciseName: string, limit = 20): ExerciseLo
   );
 }
 
+// Unified progression history — merges exercise_logs, pr_history, and the
+// current personal_record so manually-logged PRs appear in the chart.
+export interface PRProgressionEntry {
+  session_date: string;
+  exercise_name: string;
+  sets: number;
+  reps: number;
+  weight: number;
+  unit: string;
+}
+
+export function getPRProgressionHistory(exerciseName: string): PRProgressionEntry[] {
+  const db = getDb();
+
+  // 1. Actual workout logs
+  const fromLogs = db.getAllSync<PRProgressionEntry>(
+    `SELECT session_date, exercise_name, sets, reps, weight, unit
+     FROM exercise_logs WHERE exercise_name=? ORDER BY session_date ASC`,
+    [exerciseName]
+  );
+
+  // 2. Archived PR history (manual + auto)
+  const fromHistory = db.getAllSync<PRProgressionEntry>(
+    `SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit
+     FROM pr_history WHERE exercise_name=? ORDER BY record_date ASC`,
+    [exerciseName]
+  );
+
+  // 3. Current PR record
+  const currentPR = db.getFirstSync<PRProgressionEntry>(
+    `SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit
+     FROM personal_records WHERE exercise_name=?`,
+    [exerciseName]
+  );
+
+  // Merge all sources, sort by date, then deduplicate by date+weight+reps
+  const all: PRProgressionEntry[] = [...fromLogs, ...fromHistory];
+  if (currentPR) all.push(currentPR);
+
+  all.sort((a, b) => a.session_date.localeCompare(b.session_date));
+
+  const seen = new Set<string>();
+  return all.filter(e => {
+    const key = `${e.session_date}-${e.weight}-${e.reps}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function getAllExerciseNames(): string[] {
   return getDb()
     .getAllSync<{ exercise_name: string }>('SELECT DISTINCT exercise_name FROM exercise_logs ORDER BY exercise_name')
@@ -596,6 +653,36 @@ export function checkPRForLog(
 
 export function getAllPRs(): PR[] {
   return getDb().getAllSync<PR>('SELECT * FROM personal_records ORDER BY exercise_name');
+}
+
+export function logPRManually(
+  exerciseName: string,
+  sets: number,
+  reps: number,
+  weight: number,
+  unit = 'kg',
+  recordDate?: string
+): void {
+  const db = getDb();
+  const d = recordDate || todayStr();
+  const oneRepMax = calculate1RM(weight, reps);
+  const existing = db.getFirstSync<PR>('SELECT * FROM personal_records WHERE exercise_name=?', [exerciseName]);
+
+  // Archive old PR to history first
+  if (existing) {
+    db.runSync(
+      `INSERT INTO pr_history (exercise_name, record_date, sets, reps, weight, unit, one_rep_max)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [existing.exercise_name, existing.record_date, existing.sets, existing.reps, existing.weight, existing.unit, existing.one_rep_max]
+    );
+  }
+
+  // Upsert the new PR
+  db.runSync(
+    `INSERT OR REPLACE INTO personal_records (exercise_name, record_date, sets, reps, weight, unit, one_rep_max)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [exerciseName, d, sets, reps, weight, unit, oneRepMax]
+  );
 }
 
 export interface WeightEntry {
@@ -712,4 +799,63 @@ export function getLastNDaysLogs(n = 30): DailyLog[] {
   const s = start.toISOString().split('T')[0];
 
   return getDb().getAllSync<DailyLog>('SELECT * FROM daily_logs WHERE log_date>=? ORDER BY log_date ASC', [s]);
+}
+
+export function resetDatabase(): void {
+  const db = getDb();
+  db.execSync(`
+    DROP TABLE IF EXISTS daily_logs;
+    DROP TABLE IF EXISTS food_log;
+    DROP TABLE IF EXISTS water_log;
+    DROP TABLE IF EXISTS workout_sessions;
+    DROP TABLE IF EXISTS exercise_logs;
+    DROP TABLE IF EXISTS personal_records;
+    DROP TABLE IF EXISTS pr_history;
+    DROP TABLE IF EXISTS weight_history;
+    DROP TABLE IF EXISTS muscle_tracker;
+    DROP TABLE IF EXISTS streaks;
+    DROP TABLE IF EXISTS goals;
+    DROP TABLE IF EXISTS workout_plans;
+    DROP TABLE IF EXISTS workout_plan_exercises;
+    DROP TABLE IF EXISTS settings;
+  `);
+  initializeDatabase();
+}
+
+// ── Progress Photos ────────────────────────────────────────────────────────
+export type ProgressPhoto = {
+  id: number;
+  photo_date: string;
+  uri: string;
+  created_at: string;
+};
+
+export function addProgressPhoto(photo_date: string, uri: string): number {
+  const db = getDb();
+  const result = db.runSync(
+    'INSERT INTO progress_photos (photo_date, uri) VALUES (?, ?)',
+    [photo_date, uri]
+  );
+  return result.lastInsertRowId;
+}
+
+export function getProgressPhotos(photo_date: string): ProgressPhoto[] {
+  const db = getDb();
+  return db.getAllSync<ProgressPhoto>(
+    'SELECT * FROM progress_photos WHERE photo_date = ? ORDER BY created_at ASC',
+    [photo_date]
+  );
+}
+
+export function getProgressPhotoDates(): string[] {
+  const db = getDb();
+  const rows = db.getAllSync<{ photo_date: string }>(
+    'SELECT DISTINCT photo_date FROM progress_photos ORDER BY photo_date ASC'
+  );
+  return rows.map(r => r.photo_date);
+}
+
+export function deleteProgressPhoto(id: number, uri: string): void {
+  const db = getDb();
+  db.runSync('DELETE FROM progress_photos WHERE id = ?', [id]);
 }
