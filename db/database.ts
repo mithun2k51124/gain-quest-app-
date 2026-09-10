@@ -460,6 +460,7 @@ export interface WorkoutSession {
   id: number;
   session_date: string;
   muscle_groups: string;
+  duration_minutes?: number;
   notes: string | null;
 }
 
@@ -858,4 +859,66 @@ export function getProgressPhotoDates(): string[] {
 export function deleteProgressPhoto(id: number, uri: string): void {
   const db = getDb();
   db.runSync('DELETE FROM progress_photos WHERE id = ?', [id]);
+}
+
+// ── Daily Date-Specific Queries for Workouts & Nutrition Analytics ────────────
+
+export function getWorkoutSessionsForDate(date: string): WorkoutSession[] {
+  return getDb().getAllSync<WorkoutSession>(
+    'SELECT * FROM workout_sessions WHERE session_date=? ORDER BY id ASC',
+    [date]
+  );
+}
+
+export function getExerciseLogsForDate(date: string): ExerciseLog[] {
+  return getDb().getAllSync<ExerciseLog>(
+    'SELECT * FROM exercise_logs WHERE session_date=? ORDER BY id ASC',
+    [date]
+  );
+}
+
+export function getWorkoutDates(): string[] {
+  const db = getDb();
+  const rows = db.getAllSync<{ d: string }>(`
+    SELECT DISTINCT session_date as d FROM workout_sessions
+    UNION
+    SELECT DISTINCT session_date as d FROM exercise_logs
+    UNION
+    SELECT DISTINCT log_date as d FROM daily_logs WHERE workout_completed = 1
+    ORDER BY d ASC
+  `);
+  return rows.map(r => r.d).filter(Boolean);
+}
+
+export function getDailyLogForDate(date: string): DailyLog | null {
+  return getDb().getFirstSync<DailyLog>('SELECT * FROM daily_logs WHERE log_date=?', [date]);
+}
+
+export interface WaterEntry {
+  id: number;
+  log_date: string;
+  amount_ml: number;
+  logged_at: string;
+}
+
+export function getWaterLog(logDate?: string): WaterEntry[] {
+  const d = logDate || todayStr();
+  return getDb().getAllSync<WaterEntry>(
+    'SELECT * FROM water_log WHERE log_date=? ORDER BY logged_at ASC',
+    [d]
+  );
+}
+
+export function getNutritionDates(): string[] {
+  const db = getDb();
+  const rows = db.getAllSync<{ d: string }>(`
+    SELECT DISTINCT log_date as d FROM daily_logs 
+    WHERE protein_intake > 0 OR calorie_intake > 0 OR water_intake > 0 OR creatine_taken = 1
+    UNION
+    SELECT DISTINCT log_date as d FROM food_log
+    UNION
+    SELECT DISTINCT log_date as d FROM water_log
+    ORDER BY d ASC
+  `);
+  return rows.map(r => r.d).filter(Boolean);
 }

@@ -46,19 +46,30 @@ type Tab = 'Planner' | 'Muscles' | 'Log' | 'History';
 // this screen, with grouped support)
 // ─────────────────────────────────────────────────────────────────────────────
 function NeuModal({
-  visible, title, onClose, children,
+  visible, title, onClose, children, fullScreen,
 }: {
-  visible: boolean; title: string; onClose: () => void; children: React.ReactNode;
+  visible: boolean; title: string; onClose: () => void; children: React.ReactNode; fullScreen?: boolean;
 }) {
   const { C } = useTheme();
   const neuStyles = makeNeuStyles(C);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={neuStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={neuStyles.sheet} onPress={e => e.stopPropagation()}>
+        <TouchableOpacity
+          activeOpacity={1}
+          style={[neuStyles.sheet, fullScreen && neuStyles.sheetFull]}
+          onPress={e => e.stopPropagation()}
+        >
           <View style={neuStyles.handle} />
-          <Text style={neuStyles.sheetTitle}>{title}</Text>
-          {children}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={neuStyles.sheetTitle}>{title}</Text>
+            <TouchableOpacity onPress={onClose} style={{ padding: 4 }}>
+              <Ionicons name="close-circle" size={24} color={C.muted} />
+            </TouchableOpacity>
+          </View>
+          <View style={fullScreen ? { flex: 1 } : {}}>
+            {children}
+          </View>
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
@@ -89,8 +100,14 @@ function GroupedExercisePicker({
 }) {
   const { C } = useTheme();
   const neuStyles = makeNeuStyles(C);
-  const [openGroup, setOpenGroup] = useState<string | null>(muscleGroups[0] ?? null);
+  const allGroups = muscleGroups.length ? muscleGroups : Object.keys(EXERCISE_LIBRARY);
+  const [activeTab, setActiveTab] = useState<string>(allGroups[0] ?? '');
   const [selected, setSelected] = useState<{ muscle: string; exercise: string }[]>([]);
+
+  // Custom exercise creation
+  const [showCustom, setShowCustom] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customMuscle, setCustomMuscle] = useState(allGroups[0] ?? 'Chest');
 
   const isSelected = (exercise: string) =>
     selected.some(s => s.exercise === exercise);
@@ -103,57 +120,164 @@ function GroupedExercisePicker({
     );
   };
 
+  const removeSelected = (exercise: string) => {
+    setSelected(prev => prev.filter(s => s.exercise !== exercise));
+  };
+
+  const addCustomExercise = () => {
+    const name = customName.trim();
+    if (!name) return;
+    if (!isSelected(name)) {
+      setSelected(prev => [...prev, { muscle: customMuscle, exercise: name }]);
+    }
+    setCustomName('');
+    setShowCustom(false);
+  };
+
+  const exercises = EXERCISE_LIBRARY[activeTab] || [];
+  const activeColor = C.mg[activeTab] || C.accent;
+
   return (
-    <View>
-      <ScrollView style={{ maxHeight: 360 }}>
-        {muscleGroups.map(mg => {
-          const exercises = EXERCISE_LIBRARY[mg] || [];
-          const isOpen = openGroup === mg;
-          const color = C.mg[mg] || C.accent;
-          const selectedInGroup = selected.filter(s => s.muscle === mg).length;
+    <View style={{ flex: 1 }}>
 
+      {/* ── Selected pills strip (sticky at top) ── */}
+      {selected.length > 0 && (
+        <View style={neuStyles.selectedStrip}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 2 }}>
+            {selected.map(s => {
+              const col = C.mg[s.muscle] || C.accent;
+              return (
+                <TouchableOpacity
+                  key={s.exercise}
+                  style={[neuStyles.selectedPill, { backgroundColor: col + '28', borderColor: col }]}
+                  onPress={() => removeSelected(s.exercise)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[neuStyles.selectedPillText, { color: col }]}>{s.exercise}</Text>
+                  <Text style={[neuStyles.selectedPillX, { color: col }]}>  ×</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ── Muscle group tabs (horizontal scroll) ── */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={neuStyles.tabScroll}
+        contentContainerStyle={{ gap: 8, paddingVertical: 4, paddingHorizontal: 2 }}
+      >
+        {allGroups.map(mg => {
+          const col = C.mg[mg] || C.accent;
+          const isActive = activeTab === mg;
+          const count = selected.filter(s => s.muscle === mg).length;
           return (
-            <View key={mg}>
-              {/* Group header */}
-              <TouchableOpacity
-                style={[neuStyles.groupHeader, { borderLeftColor: color }]}
-                onPress={() => setOpenGroup(isOpen ? null : mg)}
-              >
-                <Text style={[neuStyles.groupTitle, { color }]}>{mg}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {selectedInGroup > 0 && (
-                    <View style={[neuStyles.groupBadge, { backgroundColor: color }]}>
-                      <Text style={neuStyles.groupBadgeText}>{selectedInGroup}</Text>
-                    </View>
-                  )}
-                  <Text style={[neuStyles.groupChevron, { color }]}>{isOpen ? '▲' : '▼'}</Text>
+            <TouchableOpacity
+              key={mg}
+              style={[
+                neuStyles.mgTab,
+                isActive && { backgroundColor: col, borderColor: col },
+                !isActive && { borderColor: C.border },
+              ]}
+              onPress={() => setActiveTab(mg)}
+              activeOpacity={0.8}
+            >
+              <Text style={[neuStyles.mgTabText, { color: isActive ? '#fff' : col }]}>{mg}</Text>
+              {count > 0 && (
+                <View style={[neuStyles.mgTabBadge, { backgroundColor: isActive ? 'rgba(255,255,255,0.3)' : col }]}>
+                  <Text style={neuStyles.mgTabBadgeText}>{count}</Text>
                 </View>
-              </TouchableOpacity>
-
-              {/* Exercises */}
-              {isOpen && exercises.map(ex => {
-                const sel = isSelected(ex);
-                return (
-                  <TouchableOpacity
-                    key={ex}
-                    style={[neuStyles.exOptRow, sel && { backgroundColor: color + '18' }]}
-                    onPress={() => toggle(mg, ex)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[neuStyles.exCheckbox, sel && { backgroundColor: color, borderColor: color }]}>
-                      {sel && <Text style={neuStyles.exCheckmark}>✓</Text>}
-                    </View>
-                    <View style={[neuStyles.exDot, { backgroundColor: color }]} />
-                    <Text style={[neuStyles.exOptText, sel && { color: C.text, fontWeight: '700' }]}>{ex}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+              )}
+            </TouchableOpacity>
           );
         })}
       </ScrollView>
 
-      {/* Confirm button */}
+      {/* ── Exercise list for active tab ── */}
+      <ScrollView style={neuStyles.exListScroll} showsVerticalScrollIndicator={false}>
+
+        {/* Custom exercise creation row */}
+        {!showCustom ? (
+          <TouchableOpacity
+            style={neuStyles.createCustomBtn}
+            onPress={() => setShowCustom(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="add-circle-outline" size={18} color={C.accent} />
+            <Text style={[neuStyles.createCustomText, { color: C.accent }]}>  Create custom exercise</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={neuStyles.customInputRow}>
+            <TextInput
+              style={[neuStyles.customInput, { color: C.text, borderColor: C.accent }]}
+              placeholder="Exercise name…"
+              placeholderTextColor={C.muted}
+              value={customName}
+              onChangeText={setCustomName}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={addCustomExercise}
+            />
+            {/* Muscle picker for custom */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }} contentContainerStyle={{ gap: 6 }}>
+              {allGroups.map(mg => {
+                const col = C.mg[mg] || C.accent;
+                const sel = customMuscle === mg;
+                return (
+                  <TouchableOpacity
+                    key={mg}
+                    style={[neuStyles.mgTab, { borderColor: sel ? col : C.border, backgroundColor: sel ? col + '22' : 'transparent', paddingVertical: 4, paddingHorizontal: 10 }]}
+                    onPress={() => setCustomMuscle(mg)}
+                  >
+                    <Text style={[neuStyles.mgTabText, { color: sel ? col : C.muted, fontSize: 11 }]}>{mg}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+              <TouchableOpacity
+                style={[neuStyles.confirmBtn, { flex: 1, paddingVertical: 10, backgroundColor: C.accent, marginTop: 0 }]}
+                onPress={addCustomExercise}
+              >
+                <Text style={[neuStyles.confirmBtnText, { color: '#fff' }]}>Add</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[neuStyles.confirmBtn, { flex: 1, paddingVertical: 10, backgroundColor: C.border, marginTop: 0 }]}
+                onPress={() => { setShowCustom(false); setCustomName(''); }}
+              >
+                <Text style={[neuStyles.confirmBtnText, { color: C.muted }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Exercise rows */}
+        {exercises.map((ex, idx) => {
+          const sel = isSelected(ex);
+          return (
+            <TouchableOpacity
+              key={ex}
+              style={[
+                neuStyles.exOptRow,
+                sel && { backgroundColor: activeColor + '18' },
+                idx === exercises.length - 1 && { borderBottomWidth: 0 },
+              ]}
+              onPress={() => toggle(activeTab, ex)}
+              activeOpacity={0.7}
+            >
+              <View style={[neuStyles.exCheckbox, sel && { backgroundColor: activeColor, borderColor: activeColor }]}>
+                {sel && <Text style={neuStyles.exCheckmark}>✓</Text>}
+              </View>
+              <View style={[neuStyles.exDot, { backgroundColor: activeColor }]} />
+              <Text style={[neuStyles.exOptText, sel && { color: C.text, fontWeight: '700' }]}>{ex}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* ── Confirm button ── */}
       <TouchableOpacity
         style={[
           neuStyles.confirmBtn,
@@ -973,6 +1097,7 @@ function PlannerTab({
         visible={!!exerciseDay}
         title={`Add Exercises${exerciseDay ? ` — ${exerciseDay}` : ''}`}
         onClose={() => setExerciseDay(null)}
+        fullScreen
       >
         <GroupedExercisePicker
           muscleGroups={musclesForPicker}
@@ -1236,7 +1361,7 @@ function makeStyles(C: any) { return StyleSheet.create({
 function makeNeuStyles(C: any) { return StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(40,50,70,0.35)',
+    backgroundColor: 'rgba(20,30,50,0.55)',
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -1245,11 +1370,16 @@ function makeNeuStyles(C: any) { return StyleSheet.create({
     borderTopRightRadius: 28,
     padding: 20,
     paddingBottom: 36,
-    shadowColor: '#BFC8D6',
+    maxHeight: '60%',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.3,
     shadowRadius: 16,
     elevation: 20,
+  },
+  sheetFull: {
+    height: '92%',
+    maxHeight: '92%',
   },
   handle: {
     width: 40,
@@ -1257,13 +1387,97 @@ function makeNeuStyles(C: any) { return StyleSheet.create({
     backgroundColor: C.shadowDark,
     borderRadius: 3,
     alignSelf: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   sheetTitle: {
     fontSize: 18,
     fontWeight: '800',
     color: C.text,
-    marginBottom: 12,
+  },
+  // Selected pills strip
+  selectedStrip: {
+    marginBottom: 10,
+    paddingVertical: 4,
+  },
+  selectedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  selectedPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  selectedPillX: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  // Muscle group horizontal tabs
+  tabScroll: {
+    marginBottom: 10,
+    flexGrow: 0,
+  },
+  mgTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    gap: 5,
+  },
+  mgTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  mgTabBadge: {
+    borderRadius: 8,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  mgTabBadgeText: {
+    fontSize: 11,
+    color: '#fff',
+    fontWeight: '800',
+  },
+  // Exercise list scroll area
+  exListScroll: {
+    flex: 1,
+    marginBottom: 8,
+  },
+  // Custom exercise creation
+  createCustomBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    marginBottom: 4,
+  },
+  createCustomText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customInputRow: {
+    backgroundColor: C.bg,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: C.accent,
+  },
+  customInput: {
+    fontSize: 15,
+    fontWeight: '600',
+    borderBottomWidth: 1,
+    paddingBottom: 6,
   },
   // Flat option row
   optRow: {
