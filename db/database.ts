@@ -165,6 +165,10 @@ export function initializeDatabase(): void {
       uri TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS starred_pr_exercises (
+      exercise_name TEXT PRIMARY KEY
+    );
   `);
 
   const goalCount = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM goals');
@@ -378,6 +382,28 @@ export function deleteFoodEntry(id: number): void {
   updateDailyLog(row.log_date, { protein_goal_reached: log.protein_intake >= goals.protein_goal ? 1 : 0 });
 }
 
+export function updateFoodEntry(id: number, foodName: string, protein: number, calories: number): void {
+  const db = getDb();
+  const row = db.getFirstSync<FoodEntry>('SELECT * FROM food_log WHERE id=?', [id]);
+  if (!row) return;
+
+  db.runSync('UPDATE food_log SET food_name=?, protein=?, calories=? WHERE id=?', [
+    foodName,
+    protein,
+    calories,
+    id,
+  ]);
+  const diffProt = protein - row.protein;
+  const diffCals = calories - row.calories;
+  db.runSync(
+    'UPDATE daily_logs SET protein_intake=protein_intake+?, calorie_intake=calorie_intake+? WHERE log_date=?',
+    [diffProt, diffCals, row.log_date]
+  );
+  const goals = getGoals();
+  const log = getTodayLog(row.log_date);
+  updateDailyLog(row.log_date, { protein_goal_reached: log.protein_intake >= goals.protein_goal ? 1 : 0 });
+}
+
 export function logCreatine(logDate?: string): void {
   const db = getDb();
   const d = logDate || todayStr();
@@ -520,6 +546,13 @@ export function getSessionExercises(sessionId: number): ExerciseLog[] {
   return getDb().getAllSync<ExerciseLog>('SELECT * FROM exercise_logs WHERE session_id=? ORDER BY id', [sessionId]);
 }
 
+export function getExercisesForDate(date: string): ExerciseLog[] {
+  return getDb().getAllSync<ExerciseLog>(
+    'SELECT * FROM exercise_logs WHERE session_date=? ORDER BY id',
+    [date]
+  );
+}
+
 export function getExerciseHistory(exerciseName: string, limit = 20): ExerciseLog[] {
   return getDb().getAllSync<ExerciseLog>(
     'SELECT * FROM exercise_logs WHERE exercise_name=? ORDER BY session_date ASC LIMIT ?',
@@ -654,6 +687,91 @@ export function checkPRForLog(
 
 export function getAllPRs(): PR[] {
   return getDb().getAllSync<PR>('SELECT * FROM personal_records ORDER BY exercise_name');
+}
+
+/** All distinct dates where any PR was logged (for calendar dots). */
+export function getPRDates(): string[] {
+  const db = getDb();
+  const rows = db.getAllSync<{ d: string }>(`
+    SELECT DISTINCT record_date as d FROM pr_history
+    UNION
+    SELECT DISTINCT record_date as d FROM personal_records
+    ORDER BY d ASC
+  `);
+  return rows.map(r => r.d).filter(Boolean);
+}
+
+/** Most recent N PR entries across all exercises (newest first).
+ *  Unions pr_history (old PRs) + personal_records (current best, incl. first-time & custom)
+ *  so custom exercises logged for the first time always appear. */
+export function getRecentPRHistory(limit = 10): (PRProgressionEntry & { one_rep_max?: number })[] {
+  const db = getDb();
+  const rows = db.getAllSync<PRProgressionEntry & { one_rep_max?: number }>(`
+    SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
+    FROM pr_history
+    UNION ALL
+    SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
+    FROM personal_records
+    ORDER BY session_date DESC
+    LIMIT ?
+  `, [limit * 2]); // fetch extra to allow dedup
+
+  // Deduplicate: keep only the first (most recent) entry per exercise+weight+reps combo
+  const seen = new Set<string>();
+  const deduped = rows.filter(e => {
+    const key = `${e.exercise_name}-${e.weight}-${e.reps}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return deduped.slice(0, limit);
+}
+
+/** Star / unstar an exercise for the PR pinboard. */
+export function starPRExercise(exerciseName: string): void {
+  getDb().runSync('INSERT OR IGNORE INTO starred_pr_exercises (exercise_name) VALUES (?)', [exerciseName]);
+}
+
+export function unstarPRExercise(exerciseName: string): void {
+  getDb().runSync('DELETE FROM starred_pr_exercises WHERE exercise_name=?', [exerciseName]);
+}
+
+export function getStarredPRExercises(): string[] {
+  return getDb()
+    .getAllSync<{ exercise_name: string }>('SELECT exercise_name FROM starred_pr_exercises ORDER BY exercise_name')
+    .map(r => r.exercise_name);
+}
+
+export function isPRExerciseStarred(exerciseName: string): boolean {
+  const r = getDb().getFirstSync<{ exercise_name: string }>(
+    'SELECT exercise_name FROM starred_pr_exercises WHERE exercise_name=?',
+    [exerciseName]
+  );
+  return !!r;
+}
+
+/** All PR entries (history + current) logged on a specific date. */
+export function getPRsForDate(date: string): (PRProgressionEntry & { one_rep_max?: number })[] {
+  const db = getDb();
+  const fromHistory = db.getAllSync<PRProgressionEntry & { one_rep_max?: number }>(
+    `SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
+     FROM pr_history WHERE record_date=? ORDER BY id ASC`,
+    [date]
+  );
+  const fromCurrent = db.getAllSync<PRProgressionEntry & { one_rep_max?: number }>(
+    `SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
+     FROM personal_records WHERE record_date=? ORDER BY exercise_name ASC`,
+    [date]
+  );
+  // Merge, deduplicate by exercise+weight+reps
+  const all = [...fromHistory, ...fromCurrent];
+  const seen = new Set<string>();
+  return all.filter(e => {
+    const key = `${e.exercise_name}-${e.weight}-${e.reps}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function logPRManually(

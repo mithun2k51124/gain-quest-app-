@@ -6,4 +6,9 @@ fix*.js
 expo-env.d.ts
 .DS_Store
 *.orig.*
+*.tmp
+*.zip
+*.ps1
+*.env*
+new_ninja/
 

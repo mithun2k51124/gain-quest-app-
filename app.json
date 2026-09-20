@@ -11,14 +11,22 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.gainquest.app"
+      "bundleIdentifier": "com.gainquest.app",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "GainQuest uses speech recognition to log your workouts by voice.",
+        "NSMicrophoneUsageDescription": "GainQuest needs your microphone to record voice workout commands."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A0E1A"
       },
-      "package": "com.gainquest.app"
+      "package": "com.gainquest.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -30,6 +38,13 @@
         {
           "photosPermission": "GainQuest needs access to your photos to save progress pics.",
           "cameraPermission": "GainQuest needs camera access to capture your progress."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "GainQuest needs your microphone to record voice workout commands.",
+          "speechRecognitionPermission": "GainQuest uses speech recognition to log workouts by voice."
         }
       ]
     ],

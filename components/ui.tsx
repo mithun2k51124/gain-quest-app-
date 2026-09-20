@@ -61,8 +61,6 @@ export function Card({
     <View style={[styles.cardOuter, neuShadow(C, 'raised'), style]}>
       {/* top-left white highlight */}
       <View style={styles.cardHighlight} />
-      {/* accent strip */}
-      <View style={[styles.cardAccentBar, { backgroundColor: accent }]} />
       <View style={styles.cardInner}>{children}</View>
     </View>
   );
@@ -514,13 +512,7 @@ function makeStyles(C: any) { return StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     zIndex: 1,
   },
-  cardAccentBar: {
-    height: 4,
-    width: '35%',
-    alignSelf: 'center',
-    borderBottomLeftRadius: 4,
-    borderBottomRightRadius: 4,
-  },
+
   cardInner: {
     // content goes here
   },
@@ -579,11 +571,7 @@ function makeStyles(C: any) { return StyleSheet.create({
     backgroundColor: C.shadowDark,
     overflow: 'hidden',
     width: '100%',
-    // Inset shadow illusion via border
-    borderTopWidth: 1,
-    borderTopColor: '#B8C2CF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#FFFFFF',
+    borderRadius: 99,
   },
   barFill: {
     backgroundColor: C.accent,

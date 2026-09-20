@@ -10,6 +10,7 @@ import { initializeDatabase, getOnboardingComplete } from '../db/database';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import { AlertProvider } from '../contexts/AlertContext';
 import OnboardingModal from '../components/OnboardingModal';
+import AIWorkoutLogger from '../components/AIWorkoutLogger';
 
 export default function RootLayout() {
   return (
@@ -156,6 +157,9 @@ function RootLayoutInner() {
         visible={showOnboarding}
         onComplete={() => setShowOnboarding(false)}
       />
+
+      {/* Global AI Workout Logger FAB — visible on all tabs */}
+      <AIWorkoutLogger />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

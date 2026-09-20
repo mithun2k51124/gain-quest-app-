@@ -106,11 +106,36 @@ export default function DashboardScreen() {
   };
 
   const habits = [
-    { icon: 'barbell-outline', label: 'Workout', done: !!log.workout_completed },
-    { icon: 'flash-outline', label: 'Creatine', done: !!log.creatine_taken },
-    { icon: 'water-outline', label: 'Water', done: !!log.water_goal_reached },
-    { icon: 'restaurant-outline', label: 'Protein', done: !!log.protein_goal_reached },
-    { icon: 'moon-outline', label: 'Sleep', done: !!log.slept_well },
+    {
+      icon: 'barbell-outline',
+      label: 'Workout',
+      done: !!log.workout_completed,
+      info: 'Auto-tracked when you log a workout session in the Workouts tab.',
+    },
+    {
+      icon: 'flash-outline',
+      label: 'Creatine',
+      done: !!log.creatine_taken,
+      info: 'Logged from the Tracker tab when you mark creatine as taken.',
+    },
+    {
+      icon: 'water-outline',
+      label: 'Water',
+      done: !!log.water_goal_reached,
+      info: 'Auto-marks when your water intake reaches your daily goal.',
+    },
+    {
+      icon: 'restaurant-outline',
+      label: 'Protein',
+      done: !!log.protein_goal_reached,
+      info: 'Auto-marks when your protein intake reaches your daily goal.',
+    },
+    {
+      icon: 'moon-outline',
+      label: 'Sleep',
+      done: !!log.slept_well,
+      info: 'Logged from the Tracker tab when you mark sleep as good.',
+    },
   ];
   const habitsDone = habits.filter(h => h.done).length;
 
@@ -314,15 +339,23 @@ export default function DashboardScreen() {
               <View style={[styles.habitsBox, { flex: 1, justifyContent: 'space-between' }]}>
                 <View>
                   {habits.map((h, i) => (
-                    <View key={i} style={styles.habitRow}>
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.habitRow}
+                      activeOpacity={0.7}
+                      onPress={() => showAlert(
+                        h.done ? `✅ ${h.label} Done!` : `○ ${h.label} Pending`,
+                        h.info
+                      )}
+                    >
                       <View style={styles.habitIconWrap}>
-                        <Ionicons name={h.icon as any} size={16} color={C.muted} />
+                        <Ionicons name={h.icon as any} size={16} color={h.done ? C.green : C.muted} />
                       </View>
-                      <Text style={styles.habitLabel}>{h.label}</Text>
+                      <Text style={[styles.habitLabel, h.done && { color: C.text, fontWeight: '700' }]}>{h.label}</Text>
                       <Text style={{ color: h.done ? C.green : C.muted, fontWeight: '800' }}>
                         {h.done ? '✓' : '○'}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
                 <View style={styles.habitProgressBox}>

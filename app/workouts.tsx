@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import Svg, { Path, Rect, Circle } from 'react-native-svg';
 import {
   View,
   Text,
@@ -22,6 +23,7 @@ import {
   createWorkoutSession,
   logExercise,
   getSessionExercises,
+  getExercisesForDate,
   getWorkoutSessions,
   checkPRForLog,
   updateDailyLog,
@@ -604,7 +606,18 @@ export default function WorkoutsScreen() {
                   style={styles.muscleCard}
                 >
                   <View style={[styles.muscleIcon, { backgroundColor: mgColor + '22' }]}>
-                    <Text style={{ fontSize: 20 }}>💪</Text>
+                    <Svg width={26} height={26} viewBox="0 0 64 64">
+                      {/* Dumbbell bar */}
+                      <Rect x="20" y="29" width="24" height="6" rx="3" fill={mgColor} />
+                      {/* Left weight plate outer */}
+                      <Rect x="6" y="20" width="8" height="24" rx="4" fill={mgColor} opacity={0.85} />
+                      {/* Left weight plate inner */}
+                      <Rect x="14" y="24" width="6" height="16" rx="3" fill={mgColor} />
+                      {/* Right weight plate outer */}
+                      <Rect x="50" y="20" width="8" height="24" rx="4" fill={mgColor} opacity={0.85} />
+                      {/* Right weight plate inner */}
+                      <Rect x="44" y="24" width="6" height="16" rx="3" fill={mgColor} />
+                    </Svg>
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.muscleName}>{m.muscle_group}</Text>
@@ -707,24 +720,47 @@ export default function WorkoutsScreen() {
         )}
 
         {tab === 'History' && (() => {
-          const activeSession = sessions.find(s => s.id === selectedHistoryId) || sessions[0] || null;
-          const exsForActive = activeSession ? getSessionExercises(activeSession.id) : [];
-
-          // Compute total sets per muscle group for active session
-          const setCountsMap: Record<string, number> = {};
-          if (activeSession) {
-            for (const ex of exsForActive) {
-              const mg = ex.muscle_group;
-              if (mg) {
-                setCountsMap[mg] = (setCountsMap[mg] || 0) + (ex.sets || 1);
+          // ── Group sessions by date ──────────────────────────────────────────
+          const dateGroups: Record<string, { sessions: typeof sessions; allMuscles: string[] }> = {};
+          for (const s of sessions) {
+            if (!dateGroups[s.session_date]) {
+              dateGroups[s.session_date] = { sessions: [], allMuscles: [] };
+            }
+            dateGroups[s.session_date].sessions.push(s);
+            // Collect all unique muscle groups for the date
+            if (s.muscle_groups) {
+              for (const mg of s.muscle_groups.split(',')) {
+                const trimmed = mg.trim();
+                if (trimmed && !dateGroups[s.session_date].allMuscles.includes(trimmed)) {
+                  dateGroups[s.session_date].allMuscles.push(trimmed);
+                }
               }
             }
-            // Fallback to session.muscle_groups if no individual exercise logs exist
-            if (Object.keys(setCountsMap).length === 0 && activeSession.muscle_groups) {
-              for (const p of activeSession.muscle_groups.split(',')) {
-                const cleaned = p.trim();
-                if (cleaned) setCountsMap[cleaned] = 1;
-              }
+          }
+          // Sorted dates descending
+          const sortedDates = Object.keys(dateGroups).sort((a, b) => b.localeCompare(a));
+
+          // Which date is currently "active"
+          const activeDate: string | null =
+            selectedHistoryId != null
+              ? (sessions.find(s => s.id === selectedHistoryId)?.session_date ?? null)
+              : (sortedDates[0] ?? null);
+
+          // All exercises for the active date across ALL sessions that day
+          const exsForActiveDate: ExerciseLog[] = activeDate ? getExercisesForDate(activeDate) : [];
+
+          // Compute total sets per muscle group for active date
+          const setCountsMap: Record<string, number> = {};
+          for (const ex of exsForActiveDate) {
+            const mg = ex.muscle_group;
+            if (mg) {
+              setCountsMap[mg] = (setCountsMap[mg] || 0) + (ex.sets || 1);
+            }
+          }
+          // Fallback: if no exercise logs exist yet, use session muscle_groups
+          if (Object.keys(setCountsMap).length === 0 && activeDate && dateGroups[activeDate]) {
+            for (const mg of dateGroups[activeDate].allMuscles) {
+              if (mg) setCountsMap[mg] = 1;
             }
           }
 
@@ -737,12 +773,12 @@ export default function WorkoutsScreen() {
                 <View style={styles.section}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                     <Text style={styles.sectionTitle}>
-                      {activeSession ? `Session: ${activeSession.session_date}` : 'Target Muscles'}
+                      {activeDate ? activeDate : 'Target Muscles'}
                     </Text>
-                    {activeSession && (
-                      <View style={{ backgroundColor: C.red + '22', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                        <Text style={{ fontSize: 11, color: C.red, fontWeight: '800' }}>
-                          {activeSession.muscle_groups}
+                    {activeDate && dateGroups[activeDate] && (
+                      <View style={{ backgroundColor: C.red + '22', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexShrink: 1, maxWidth: '55%' }}>
+                        <Text style={{ fontSize: 11, color: C.red, fontWeight: '800' }} numberOfLines={1}>
+                          {dateGroups[activeDate].allMuscles.join(', ')}
                         </Text>
                       </View>
                     )}
@@ -754,19 +790,23 @@ export default function WorkoutsScreen() {
                   {/* Body Vector Anatomy with Set Volume Heatmap */}
                   <BodyAnatomy muscleSetCounts={setCountsMap} />
 
-                  {/* Date / Session Selector Horizontal Carousel */}
-                  {sessions.length > 0 && (
+                  {/* Date Selector — one button per unique date */}
+                  {sortedDates.length > 0 && (
                     <View style={{ marginTop: 12 }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        Select Date / Session:
+                        Select Day:
                       </Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
-                        {sessions.map(s => {
-                          const isSel = activeSession?.id === s.id;
+                        {sortedDates.map(date => {
+                          const isSel = activeDate === date;
                           return (
                             <TouchableOpacity
-                              key={s.id}
-                              onPress={() => setSelectedHistoryId(s.id)}
+                              key={date}
+                              onPress={() => {
+                                // Set selectedHistoryId to the first session of that date
+                                const firstSession = dateGroups[date].sessions[0];
+                                setSelectedHistoryId(firstSession?.id ?? null);
+                              }}
                               style={{
                                 paddingVertical: 6,
                                 paddingHorizontal: 14,
@@ -777,7 +817,7 @@ export default function WorkoutsScreen() {
                               }}
                             >
                               <Text style={{ fontSize: 12, fontWeight: '700', color: isSel ? '#FFF' : C.text }}>
-                                {s.session_date}
+                                {date}
                               </Text>
                             </TouchableOpacity>
                           );
@@ -792,43 +832,59 @@ export default function WorkoutsScreen() {
               {sessions.length === 0 ? (
                 <EmptyState icon="clipboard-outline" message="No workouts logged yet" sub="Go to Log tab to start tracking" />
               ) : (
-                sessions.map(s => {
-                  const isSelected = activeSession?.id === s.id;
-                  const exs = getSessionExercises(s.id);
+                sortedDates.map(date => {
+                  const group = dateGroups[date];
+                  const isSelected = activeDate === date;
+                  const dayExs = getExercisesForDate(date);
+                  // Deduplicate exercises by name (keep highest weight/reps)
+                  const seenEx = new Set<string>();
+                  const dedupedExs = dayExs.filter(ex => {
+                    if (seenEx.has(ex.exercise_name)) return false;
+                    seenEx.add(ex.exercise_name);
+                    return true;
+                  });
 
                   return (
                     <TouchableOpacity
-                      key={s.id}
+                      key={date}
                       activeOpacity={0.85}
-                      onPress={() => setSelectedHistoryId(s.id)}
+                      onPress={() => {
+                        const firstSession = group.sessions[0];
+                        setSelectedHistoryId(firstSession?.id ?? null);
+                      }}
                       style={{ marginBottom: 14 }}
                     >
                       <Card accent={isSelected ? C.red : C.accent}>
                         <View style={styles.section}>
                           <View style={styles.histHeader}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                               <Text style={[styles.histDate, isSelected && { color: C.red, fontWeight: '800' }]}>
-                                {s.session_date}
+                                {date}
                               </Text>
                               {isSelected && (
                                 <View style={{ backgroundColor: C.red, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
                                   <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>VIEWING</Text>
                                 </View>
                               )}
+                              {group.sessions.length > 1 && (
+                                <View style={{ backgroundColor: C.accent + '22', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                  <Text style={{ color: C.accent, fontSize: 10, fontWeight: '700' }}>{group.sessions.length} sessions</Text>
+                                </View>
+                              )}
                             </View>
                             <View style={styles.mgRow}>
-                              {s.muscle_groups.split(',').slice(0, 3).map((g: string) => (
-                                <MuscleTag key={g} name={g.trim()} />
+                              {group.allMuscles.slice(0, 4).map((g: string) => (
+                                <MuscleTag key={g} name={g} />
                               ))}
+                              {group.allMuscles.length > 4 && (
+                                <View style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+                                  <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600' }}>+{group.allMuscles.length - 4} more</Text>
+                                </View>
+                              )}
                             </View>
                           </View>
-                          {s.notes ? (
-                            <Text style={{ fontSize: 13, color: C.textSub, marginBottom: 12, fontStyle: 'italic' }}>
-                              "{s.notes}"
-                            </Text>
-                          ) : null}
 
-                          {exs.slice(0, 5).map((ex: ExerciseLog) => (
+                          {dedupedExs.slice(0, 5).map((ex: ExerciseLog) => (
                             <View key={ex.id} style={styles.exRow}>
                               <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
                               <Text style={styles.exName}>{ex.exercise_name}</Text>
@@ -838,8 +894,11 @@ export default function WorkoutsScreen() {
                             </View>
                           ))}
 
-                          {exs.length > 5 && (
-                            <Text style={styles.moreText}>+ {exs.length - 5} more exercises</Text>
+                          {dedupedExs.length > 5 && (
+                            <Text style={styles.moreText}>+ {dedupedExs.length - 5} more exercises</Text>
+                          )}
+                          {dedupedExs.length === 0 && dayExs.length === 0 && (
+                            <Text style={styles.moreText}>Tap to view anatomy for this day</Text>
                           )}
                         </View>
                       </Card>
@@ -850,6 +909,7 @@ export default function WorkoutsScreen() {
             </>
           );
         })()}
+
       </NestableScrollContainer>
 
       {/* ── Save Toast ── */}

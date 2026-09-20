@@ -359,35 +359,50 @@ export default function TrackerScreen() {
         <SectionHeader title="Daily Habits" icon="checkmark-circle-outline" />
         <Card accent={C.accent}>
           <View style={styles.section}>
-            {([
-              ['workout_completed', 'barbell-outline', 'Workout Completed'],
-              ['water_goal_reached', 'water-outline', 'Water Goal Reached'],
-              ['protein_goal_reached', 'restaurant-outline', 'Protein Goal Reached'],
-              ['slept_well', 'moon-outline', 'Slept 7+ Hours'],
-            ] as [keyof DailyLog, string, string][]).map(([key, icon, label]) => (
-              <View
-                key={key}
-                style={[
-                  styles.habitRow,
-                  !!(log as any)[key] && styles.habitRowDone,
-                ]}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name={icon as any} size={20} color={C.muted} style={{ marginRight: 10 }} />
-                  <Text style={styles.habitText}>{label}</Text>
-                </View>
-                <Toggle value={!!(log as any)[key]} onToggle={() => toggleHabit(key)} />
-              </View>
-            ))}
+            {(([
+              ['workout_completed',    'barbell-outline',     'Workout Completed',    'Auto-tracked when a session is logged in Workouts.'],
+              ['water_goal_reached',   'water-outline',       'Water Goal Reached',   'Auto-tracks when your water intake hits your daily goal.'],
+              ['protein_goal_reached', 'restaurant-outline',  'Protein Goal Reached', 'Auto-tracks when your protein intake hits your daily goal.'],
+            ] as [keyof DailyLog, string, string, string][])).map(([key, icon, label, info]) => {
+              const done = !!(log as any)[key];
+              return (
+                <TouchableOpacity
+                  key={key}
+                  activeOpacity={0.75}
+                  onPress={() => showAlert(
+                    done ? `✅ ${label}` : `⏳ ${label}`,
+                    info
+                  )}
+                  style={[
+                    styles.habitRow,
+                    done && styles.habitRowDone,
+                  ]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    <View style={[styles.habitIconWrap, { backgroundColor: done ? C.green + '22' : C.border + '44' }]}>
+                      <Ionicons name={icon as any} size={18} color={done ? C.green : C.muted} />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={[styles.habitText, done && { color: C.text, fontWeight: '700' }]}>{label}</Text>
+                      <Text style={styles.habitSub}>Auto-tracked</Text>
+                    </View>
+                  </View>
+                  <View style={[styles.habitStatus, { backgroundColor: done ? C.green : C.border }]}>
+                    <Ionicons name={done ? 'checkmark' : 'time-outline'} size={14} color={done ? '#fff' : C.muted} />
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
 
-            <View style={{ marginTop: 12 }}>
+            <View style={{ marginTop: 16 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600' }}>Daily Progress</Text>
+                <Text style={{ fontSize: 11, color: C.green, fontWeight: '700' }}>
+                  {[log.workout_completed, log.water_goal_reached, log.protein_goal_reached].filter(Boolean).length} / 3
+                </Text>
+              </View>
               <ProgressBar
-                value={[
-                  log.workout_completed,
-                  log.water_goal_reached,
-                  log.protein_goal_reached,
-                  log.slept_well,
-                ].filter(Boolean).length / 4}
+                value={[log.workout_completed, log.water_goal_reached, log.protein_goal_reached].filter(Boolean).length / 3}
                 color={C.green}
                 height={8}
               />
@@ -513,13 +528,31 @@ function makeStyles(C: any) { return StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 2,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
   habitRowDone: {
     backgroundColor: C.greenDim,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 10,
+    borderBottomWidth: 0,
+    marginBottom: 2,
+  },
+  habitIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   habitText: { fontSize: 14, color: C.textSub },
+  habitSub: { fontSize: 10, color: C.muted, marginTop: 1 },
+  habitStatus: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 }); }

@@ -225,7 +225,7 @@ export default function OverallScreen() {
 
           {/* SVG Concentric Heart with Recessed Grooves, Multi-Layer Shadows & 3D Glowing Tubes */}
           <View style={styles.heartSvgContainer}>
-            <Svg width={250} height={250} viewBox="0 0 240 240">
+            <Svg width={200} height={200} viewBox="0 0 240 240">
               <Defs>
                 {rings.map(r => (
                   <LinearGradient key={r.gradientId} id={r.gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
@@ -490,9 +490,9 @@ function makeStyles(C: any, isDark: boolean) {
     // ── Samsung Health Heart Card ──
     heartCard: {
       backgroundColor: isDark ? '#0A0E18' : '#FFFFFF',
-      borderRadius: 28,
-      paddingVertical: 20,
-      paddingHorizontal: 16,
+      borderRadius: 24,
+      paddingVertical: 14,
+      paddingHorizontal: 14,
       marginBottom: 16,
       borderWidth: 1,
       borderColor: isDark ? 'rgba(255, 255, 255, 0.07)' : '#E2E8F0',
@@ -539,11 +539,11 @@ function makeStyles(C: any, isDark: boolean) {
       color: '#4ADE80',
     },
     heartSvgContainer: {
-      width: 250,
-      height: 250,
+      width: 200,
+      height: 200,
       alignItems: 'center',
       justifyContent: 'center',
-      marginVertical: 4,
+      marginVertical: 2,
     },
     heartLegendRow: {
       flexDirection: 'row',

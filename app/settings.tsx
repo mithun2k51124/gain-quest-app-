@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, RefreshControl,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -73,6 +74,7 @@ export default function SettingsScreen() {
     load();
     showAlert('Saved ✓', 'Your goals have been updated!');
   };
+
 
   const handleResetData = () => {
     showAlert(
@@ -168,7 +170,30 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
-        
+        {/* ── AI Status ─────────────────────────────────────────────── */}
+        <SectionHeader title="AI Workout Logging" icon="sparkles-outline" />
+        <Card accent={C.accent}>
+          <View style={styles.section}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.accentDim, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="flash" size={18} color={C.accent} />
+              </View>
+              <View>
+                <Text style={styles.prefLabel}>Gemini AI — Built In</Text>
+                <Text style={styles.prefSub}>Powered by Google Gemini 2.5 Flash</Text>
+              </View>
+            </View>
+            <View style={[styles.apiKeyStatus, { backgroundColor: C.greenDim }]}>
+              <Text style={{ color: C.green, fontSize: 13, fontWeight: '700' }}>
+                ✅ AI Active — Ready to log any workout
+              </Text>
+            </View>
+            <Text style={[styles.prefSub, { marginTop: 10, lineHeight: 18 }]}>
+              Just tap "AI Log" and say or type anything — "I did bench press 140kg for 8 reps and 2 sets", "squats 100kg 5x5", "finished deadlifts 180 kilos three sets" — the AI understands it all.
+            </Text>
+          </View>
+        </Card>
+
 
         {/* ── Danger Zone ──────────────────────────────────────────────── */}
         <SectionHeader title="Danger Zone" icon="warning-outline" />
@@ -224,4 +249,8 @@ function makeStyles(C: any) { return StyleSheet.create({
   aboutValue:   { fontSize: 13, color: C.textSub, fontWeight: '600' },
   privacyNote:  { fontSize: 12, color: C.muted, textAlign: 'center', marginTop: 16, lineHeight: 18 },
   dangerText:   { fontSize: 13, color: C.muted, lineHeight: 20 },
+  apiKeyRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, marginBottom: 10 },
+  apiKeyInput:  { flex: 1, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
+  apiKeyBtn:    { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12 },
+  apiKeyStatus: { borderRadius: 10, padding: 10, alignItems: 'center' },
 }); }
