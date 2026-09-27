@@ -25,7 +25,8 @@
       "package": "com.gainquest.app",
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.CAMERA"
       ]
     },
     "plugins": [
@@ -33,6 +34,12 @@
       "expo-font",
       "expo-sqlite",
       "expo-status-bar",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "GainQuest needs camera access to scan food barcodes and nutrition labels."
+        }
+      ],
       [
         "expo-image-picker",
         {

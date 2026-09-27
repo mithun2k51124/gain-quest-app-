@@ -322,6 +322,140 @@ function SaveToast({ visible, day }: { visible: boolean; day: string }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Muscle Group Accordion (Log tab) — groups exercises by muscle with collapse
+// ─────────────────────────────────────────────────────────────────────────────
+const MUSCLE_DISTINCT_COLORS: Record<string, string> = {
+  'Chest': '#E05C5C',        // Coral Red
+  'Back': '#3B82F6',         // Ocean Blue
+  'Upper Back': '#2563EB',   // Royal Blue
+  'Lower Back': '#1D4ED8',   // Deep Indigo Blue
+  'Shoulders': '#8B5CF6',    // Vibrant Violet
+  'Biceps': '#10B981',       // Emerald Green
+  'Triceps': '#06B6D4',      // Bright Cyan / Turquoise
+  'Legs': '#F59E0B',         // Golden Amber
+  'Quads': '#D97706',        // Deep Amber
+  'Hamstrings': '#B45309',   // Bronze Amber
+  'Calves': '#CA8A04',       // Mustard Gold
+  'Core': '#EF4444',         // Ruby Red
+  'Abs': '#EF4444',          // Crimson
+  'Forearms': '#EC4899',     // Magenta Pink
+  'Traps': '#6366F1',        // Indigo Purple
+  'Cardio': '#F43F5E',       // Rose Red
+};
+
+function MuscleGroupAccordion({
+  muscle, exercises, loggedSets, onLog, onDelete, expandAll,
+}: {
+  muscle: string;
+  exercises: WorkoutPlanExercise[];
+  loggedSets: any[];
+  onLog: (exName: string, s: number, r: number, w: number) => void;
+  onDelete: (id: number) => void;
+  expandAll?: boolean;
+}) {
+  const { C } = useTheme();
+  const mgColor = MUSCLE_DISTINCT_COLORS[muscle] || C.mg[muscle] || C.accent;
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = expandAll || localExpanded;
+
+  const doneCount = exercises.filter(ex =>
+    loggedSets.some(s => s.name === ex.exercise_name)
+  ).length;
+
+  return (
+    <View style={{ marginBottom: 10 }}>
+      {/* Accordion Header */}
+      <TouchableOpacity
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: mgColor + '18',
+          borderRadius: 16,
+          borderWidth: 1.5,
+          borderColor: mgColor + '44',
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+          marginBottom: expanded ? 6 : 0,
+        }}
+        onPress={() => setLocalExpanded(e => !e)}
+        activeOpacity={0.8}
+      >
+        {/* Consistent Dumbbell Icon with Distinct Category Color */}
+        <View style={{
+          width: 38, height: 38, borderRadius: 12,
+          backgroundColor: mgColor + '28',
+          alignItems: 'center', justifyContent: 'center',
+          marginRight: 12,
+        }}>
+          <Ionicons name="barbell" size={20} color={mgColor} />
+        </View>
+
+        {/* Title + count */}
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 15, fontWeight: '800', color: mgColor }}>{muscle}</Text>
+          <Text style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
+            {exercises.length} exercise{exercises.length > 1 ? 's' : ''}
+            {doneCount > 0 ? `  •  ${doneCount} logged` : ''}
+          </Text>
+        </View>
+
+        {/* Exercise icon pills (up to 3) when collapsed */}
+        {!expanded && (
+          <View style={{ flexDirection: 'row', gap: 4, marginRight: 8 }}>
+            {exercises.slice(0, 3).map((ex, i) => {
+              const done = loggedSets.some(s => s.name === ex.exercise_name);
+              return (
+                <View key={i} style={{
+                  width: 28, height: 28, borderRadius: 8,
+                  backgroundColor: done ? mgColor : mgColor + '20',
+                  alignItems: 'center', justifyContent: 'center',
+                  borderWidth: 1, borderColor: mgColor + '55',
+                }}>
+                  <Ionicons name={done ? 'checkmark' : 'barbell-outline'} size={12} color={done ? '#fff' : mgColor} />
+                </View>
+              );
+            })}
+            {exercises.length > 3 && (
+              <View style={{
+                width: 28, height: 28, borderRadius: 8,
+                backgroundColor: C.border,
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: C.muted }}>+{exercises.length - 3}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Done badge */}
+        {doneCount === exercises.length && exercises.length > 0 && (
+          <View style={{ backgroundColor: C.green + '22', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginRight: 8 }}>
+            <Text style={{ fontSize: 10, color: C.green, fontWeight: '800' }}>✓ DONE</Text>
+          </View>
+        )}
+
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={mgColor} />
+      </TouchableOpacity>
+
+      {/* Expanded exercise cards */}
+      {expanded && (
+        <>
+          {exercises.map(ex => (
+            <ExerciseLogCard
+              key={ex.id}
+              ex={ex}
+              onLog={(s, r, w) => onLog(ex.exercise_name, s, r, w)}
+              loggedSets={loggedSets.filter(s => s.name === ex.exercise_name)}
+              onDelete={() => onDelete(ex.id)}
+            />
+          ))}
+        </>
+      )}
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Exercise Log Card (Log tab)
 // ─────────────────────────────────────────────────────────────────────────────
 function ExerciseLogCard({
@@ -465,6 +599,9 @@ export default function WorkoutsScreen() {
 
   // Saved toast state
   const [savedDay, setSavedDay] = useState<string | null>(null);
+
+  // View All state for Log tab accordion
+  const [viewAll, setViewAll] = useState(false);
 
   const load = useCallback(() => {
     setPlans(getWorkoutPlans());
@@ -683,28 +820,54 @@ export default function WorkoutsScreen() {
                   </Card>
                 )}
 
-                <NestableDraggableFlatList
-                  data={todaysExercises}
-                  keyExtractor={(item) => item.id.toString() + item.exercise_name}
-                  onDragEnd={({ data }) => setTodaysExercises(data)}
-                  renderItem={({ item, drag, isActive }) => (
-                    <ScaleDecorator>
+                {/* View All toggle + Grouped accordion */}
+                {(() => {
+                  const groups: Record<string, WorkoutPlanExercise[]> = {};
+                  for (const ex of todaysExercises) {
+                    if (!groups[ex.muscle_group]) groups[ex.muscle_group] = [];
+                    groups[ex.muscle_group].push(ex);
+                  }
+                  const groupEntries = Object.entries(groups);
+                  return (
+                    <>
+                      {/* View All / Collapse button */}
                       <TouchableOpacity
-                        onLongPress={drag}
-                        disabled={isActive}
-                        activeOpacity={1}
-                        style={{ elevation: isActive ? 5 : 0 }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'flex-end',
+                          paddingHorizontal: 4,
+                          paddingVertical: 8,
+                          marginBottom: 4,
+                          gap: 6,
+                        }}
+                        onPress={() => setViewAll(v => !v)}
+                        activeOpacity={0.7}
                       >
-                        <ExerciseLogCard
-                          ex={item}
-                          onLog={(s, r, w) => addExerciseSet(item.exercise_name, item.muscle_group, s, r, w)}
-                          loggedSets={exercises.filter(e => e.name === item.exercise_name)}
-                          onDelete={() => setTodaysExercises(prev => prev.filter(e => e.id !== item.id))}
+                        <Ionicons
+                          name={viewAll ? 'contract-outline' : 'expand-outline'}
+                          size={16}
+                          color={C.accent}
                         />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: C.accent }}>
+                          {viewAll ? 'Collapse All' : 'View All'}
+                        </Text>
                       </TouchableOpacity>
-                    </ScaleDecorator>
-                  )}
-                />
+
+                      {groupEntries.map(([muscle, exList]) => (
+                        <MuscleGroupAccordion
+                          key={muscle}
+                          muscle={muscle}
+                          exercises={exList}
+                          loggedSets={exercises}
+                          expandAll={viewAll}
+                          onLog={(exName, s, r, w) => addExerciseSet(exName, muscle, s, r, w)}
+                          onDelete={(id) => setTodaysExercises(prev => prev.filter(e => e.id !== id))}
+                        />
+                      ))}
+                    </>
+                  );
+                })()}
 
                 {sessionId !== null && (
                   <Card accent={C.green}>

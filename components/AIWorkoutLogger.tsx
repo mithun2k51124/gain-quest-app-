@@ -6,7 +6,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Modal, StyleSheet,
   Animated, Dimensions, Platform, ScrollView, KeyboardAvoidingView,
-  Easing,
+  Easing, Keyboard,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +15,6 @@ import { ParsedExercise } from '../utils/workoutParser';
 import {
   queryFitnessAI,
   ParsedFoodItem,
-  setGeminiApiKey,
 } from '../utils/geminiParser';
 import {
   createWorkoutSession, logExercise,
@@ -69,12 +68,32 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   const [isVoiceMode, setIsVoiceMode]         = useState(VOICE_AVAILABLE);
   const [hasPermission, setHasPermission]     = useState(false);
   const [parseError, setParseError]           = useState('');
+  const [keyboardHeight, setKeyboardHeight]   = useState(0);
+
+  // Persistent transcript ref to avoid React closure staleness during voice events
+  const transcriptRef = useRef('');
 
   // Results state
   const [workoutExercises, setWorkoutExercises] = useState<ParsedExercise[]>([]);
   const [nutritionItems, setNutritionItems]   = useState<ParsedFoodItem[]>([]);
   const [chatMessage, setChatMessage]         = useState<{ answer: string; topic?: string } | null>(null);
   const [successInfo, setSuccessInfo]         = useState<{ title: string; subtitle: string }>({ title: '', subtitle: '' });
+
+  // ── Keyboard height listener to prevent keyboard overlaying sheet ───────────
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // ── Animation refs ─────────────────────────────────────────────────────────
   const fadeAnim        = useRef(new Animated.Value(0)).current;
@@ -88,12 +107,6 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   const successScale    = useRef(new Animated.Value(0)).current;
   const successOpacity  = useRef(new Animated.Value(0)).current;
   const inputRef        = useRef<TextInput>(null);
-
-  // ── Load Gemini API key from db on mount ───────────────────────────────────
-  useEffect(() => {
-    const key = getSetting('gemini_api_key', '');
-    if (key) setGeminiApiKey(key);
-  }, []);
 
   // Eager microphone permission check
   useEffect(() => {
@@ -121,8 +134,11 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   // ── Voice events ────────────────────────────────────────────────────────────
   useSafeVoiceEvent('result', (e: any) => {
     const t = e.results?.[0]?.transcript || '';
-    setTranscript(t);
-    setInputText(t);
+    if (t) {
+      transcriptRef.current = t;
+      setTranscript(t);
+      setInputText(t);
+    }
   });
 
   useSafeVoiceEvent('volumechange', (e: any) => {
@@ -140,20 +156,20 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   useSafeVoiceEvent('end', () => {
     if (phase === 'listening') {
       setTimeout(() => {
-        const text = transcript || inputText;
-        if (text.trim()) {
+        const text = transcriptRef.current.trim() || transcript.trim() || inputText.trim();
+        if (text) {
           processInput(text);
         } else {
           setPhase('idle');
         }
-      }, 400);
+      }, 350);
     }
   });
 
   useSafeVoiceEvent('error', () => {
     if (phase === 'listening') {
-      const text = transcript || inputText;
-      if (text.trim()) {
+      const text = transcriptRef.current.trim() || transcript.trim() || inputText.trim();
+      if (text) {
         processInput(text);
       } else {
         setPhase('idle');
@@ -301,7 +317,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
     });
   }, []);
 
-  // ── Voice control: Single-Tap & Silent Mute ─────────────────────────────────
+  // ── Voice control: Single-Tap & High-Accuracy Free-Form Recognition ────────
   const startListening = async () => {
     if (!VOICE_AVAILABLE) {
       setIsVoiceMode(false);
@@ -318,22 +334,19 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
       }
     }
 
+    transcriptRef.current = '';
     setTranscript('');
     setInputText('');
     setParseError('');
     setPhase('listening');
 
     try {
-      // continuous: true & recordingOptions.persist: true mute the Android hardware beep sound!
       SpeechModule.start({
         lang: 'en-US',
         interimResults: true,
-        continuous: true,
-        recordingOptions: {
-          persist: true,
-        },
+        continuous: false,
         androidIntentOptions: {
-          EXTRA_LANGUAGE_MODEL: 'web_search',
+          EXTRA_LANGUAGE_MODEL: 'free_form',
         },
         volumeChangeEventOptions: {
           enabled: true,
@@ -363,7 +376,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   const handleMicPress = () => {
     if (phase === 'listening') {
       stopListening();
-      const text = transcript.trim() || inputText.trim();
+      const text = transcriptRef.current.trim() || transcript.trim() || inputText.trim();
       if (text) {
         processInput(text);
       } else {
@@ -506,7 +519,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
         >
           <View style={s.fabInner}>
             <Ionicons name="sparkles" size={17} color="#fff" />
-            <Text style={s.fabLabel}>AI Assistant</Text>
+            <Text style={s.fabLabel}>Log It</Text>
           </View>
         </TouchableOpacity>
       </Animated.View>
@@ -524,7 +537,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeOverlay} />
         </Animated.View>
 
-        <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }], paddingBottom: keyboardHeight > 0 ? keyboardHeight + 8 : 36 }]}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
             {/* Top Sheet Drag Handle */}
@@ -537,7 +550,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
                   <Ionicons name="sparkles" size={18} color={C.accent} />
                 </View>
                 <View>
-                  <Text style={s.sheetTitle}>GainQuest AI</Text>
+                  <Text style={s.sheetTitle}>Log It</Text>
                   <Text style={s.sheetSub}>Workouts • Nutrition • Fitness Coach</Text>
                 </View>
               </View>
@@ -770,8 +783,8 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
                     <Ionicons name="sparkles" size={26} color={C.accent} />
                   </View>
                 </Animated.View>
-                <Text style={[s.processingTitle, { marginTop: 20 }]}>AI is Thinking…</Text>
-                <Text style={s.processingSubtitle}>Analyzing your workout, nutrition, or query</Text>
+                <Text style={[s.processingTitle, { marginTop: 20 }]}>Searching Online…</Text>
+                <Text style={s.processingSubtitle}>Fetching live info from the internet</Text>
               </View>
             )}
 

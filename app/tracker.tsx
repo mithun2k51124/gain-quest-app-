@@ -32,25 +32,22 @@ import { Card, Btn, ProgressBar, Ring, Toggle, PickerModal, SectionHeader } from
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { WATER_OPTIONS, FOOD_DB } from '../constants/theme';
+import FoodScannerModal from '../components/FoodScannerModal';
+import FoodSearchModal from '../components/FoodSearchModal';
 
 export default function TrackerScreen() {
   const { showAlert } = useCustomAlert();
 
-
-  const { C } = useTheme();
+  const { C, isDark } = useTheme();
   const [log, setLog] = useState<DailyLog | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
   const [foods, setFoods] = useState<FoodEntry[]>([]);
   const [refresh, setRefresh] = useState(false);
+  const [scannerModal, setScannerModal] = useState(false);
 
   const [waterModal, setWaterModal] = useState(false);
   const [lastWaterAdd, setLastWaterAdd] = useState(0);
   const [foodModal, setFoodModal] = useState(false);
-
-  const [showCustom, setShowCustom] = useState(false);
-  const [customName, setCustomName] = useState('');
-  const [customProt, setCustomProt] = useState('0');
-  const [customCals, setCustomCals] = useState('0');
 
   const load = useCallback(() => {
     setLog(getTodayLog());
@@ -70,7 +67,12 @@ export default function TrackerScreen() {
     setRefresh(false);
   };
 
-  const styles = makeStyles(C);
+  const styles = makeStyles(C, isDark);
+
+  const handleScannerLogFood = (name: string, protein: number, calories: number) => {
+    addFood(name, protein, calories);
+    load();
+  };
 
   if (!log || !goals) return null;
 
@@ -96,29 +98,18 @@ export default function TrackerScreen() {
     }
   };
 
-  const handleAddFood = (foodKey: string) => {
-    if (foodKey === 'Custom...') {
-      setShowCustom(true);
-      return;
+  const handleLogFoodsFromModal = (items: Array<{ name: string; protein: number; calories: number }>) => {
+    for (const item of items) {
+      addFood(item.name, item.protein, item.calories);
     }
-
-    const [prot, cals] = FOOD_DB[foodKey] || [0, 0];
-    addFood(foodKey, prot, cals);
     load();
-  };
-
-  const handleAddCustomFood = () => {
-    if (!customName.trim()) {
-      showAlert('Error', 'Enter a food name.');
-      return;
+    if (items.length === 1) {
+      showAlert('Food Logged ✓', `Added ${items[0].name} (${items[0].calories} kcal, ${items[0].protein}g protein)!`);
+    } else {
+      const totCals = items.reduce((a, b) => a + b.calories, 0);
+      const totProt = items.reduce((a, b) => a + b.protein, 0);
+      showAlert('Meal Logged ✓', `Added ${items.length} items (${totCals} kcal, ${totProt.toFixed(1)}g protein) to your daily intake!`);
     }
-
-    addFood(customName.trim(), parseFloat(customProt) || 0, parseInt(customCals, 10) || 0);
-    setCustomName('');
-    setCustomProt('0');
-    setCustomCals('0');
-    setShowCustom(false);
-    load();
   };
 
   const toggleHabit = (key: keyof DailyLog) => {
@@ -133,11 +124,6 @@ export default function TrackerScreen() {
 
     load();
   };
-
-  const foodOptions = [
-    ...Object.keys(FOOD_DB).map(k => ({ label: k, value: k })),
-    { label: 'Custom...', value: 'Custom...' },
-  ];
 
   const waterOptions = WATER_OPTIONS.map(w => ({
     label: w.label,
@@ -242,55 +228,10 @@ export default function TrackerScreen() {
             </View>
 
             <Btn
-              label="+ Add Food"
+              label="+ Add Food / Search"
               color={C.calories}
               onPress={() => setFoodModal(true)}
             />
-
-            {showCustom && (
-              <View style={styles.customForm}>
-                <Text style={styles.customTitle}>Custom Food</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Food name"
-                  placeholderTextColor={C.muted}
-                  value={customName}
-                  onChangeText={setCustomName}
-                />
-
-                <View style={styles.btnRow}>
-                  <View style={{ flex: 1, marginRight: 6 }}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Protein (g)"
-                      placeholderTextColor={C.muted}
-                      keyboardType="numeric"
-                      value={customProt}
-                      onChangeText={setCustomProt}
-                    />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 6 }}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Calories"
-                      placeholderTextColor={C.muted}
-                      keyboardType="numeric"
-                      value={customCals}
-                      onChangeText={setCustomCals}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.btnRow}>
-                  <View style={{ flex: 1, marginRight: 6 }}>
-                    <Btn label="Add" color={C.green} onPress={handleAddCustomFood} />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 6 }}>
-                    <Btn label="Cancel" color={C.muted} onPress={() => setShowCustom(false)} />
-                  </View>
-                </View>
-              </View>
-            )}
 
             {foods.length > 0 && (
               <View style={styles.foodList}>
@@ -318,6 +259,32 @@ export default function TrackerScreen() {
                 ))}
               </View>
             )}
+          </View>
+        </Card>
+
+        {/* ── Barcode & Nutrition Scanner (Above Creatine) ── */}
+        <SectionHeader title="Scan & Calculate Macros" icon="barcode-outline" />
+        <Card accent="#4ADE80">
+          <View style={styles.section}>
+            <View style={styles.scannerHeroRow}>
+              <View style={[styles.scannerIconBox, { backgroundColor: isDark ? '#112F18' : '#DCFCE7' }]}>
+                <Ionicons name="scan" size={26} color="#4ADE80" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 14 }}>
+                <Text style={styles.scannerHeroTitle}>Barcode & Label Scanner</Text>
+                <Text style={styles.scannerHeroSub}>
+                  Scan barcodes or snap nutrition labels. Automatically calculates exact macros for your portion (e.g. 30g).
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.openScannerBtn}
+              onPress={() => setScannerModal(true)}
+            >
+              <Ionicons name="camera" size={18} color="#0A0E1A" style={{ marginRight: 8 }} />
+              <Text style={styles.openScannerBtnTxt}>Open Barcode & Label Scanner</Text>
+            </TouchableOpacity>
           </View>
         </Card>
 
@@ -419,18 +386,25 @@ export default function TrackerScreen() {
         onClose={() => setWaterModal(false)}
       />
 
-      <PickerModal
+      {/* Search Food, Calculate Portion & Multi-Item Meal Logger */}
+      <FoodSearchModal
         visible={foodModal}
-        title="Select Food"
-        options={foodOptions}
-        onSelect={handleAddFood}
         onClose={() => setFoodModal(false)}
+        onLogFoods={handleLogFoodsFromModal}
+        onOpenBarcodeScanner={() => setScannerModal(true)}
+      />
+
+      {/* Barcode & Nutrition Label Scanner Modal */}
+      <FoodScannerModal
+        visible={scannerModal}
+        onClose={() => setScannerModal(false)}
+        onLogFood={handleScannerLogFood}
       />
     </SafeAreaView>
   );
 }
 
-function makeStyles(C: any) { return StyleSheet.create({
+function makeStyles(C: any, isDark?: boolean) { return StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row',
@@ -554,5 +528,49 @@ function makeStyles(C: any) { return StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  scannerHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  scannerIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#4ADE8055',
+  },
+  scannerHeroTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: C.text,
+    marginBottom: 2,
+  },
+  scannerHeroSub: {
+    fontSize: 12,
+    color: C.muted,
+    lineHeight: 16,
+    fontWeight: '500',
+  },
+  openScannerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4ADE80',
+    borderRadius: 14,
+    paddingVertical: 13,
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  openScannerBtnTxt: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0A0E1A',
   },
 }); }

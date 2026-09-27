@@ -7,8 +7,9 @@ import {
   RefreshControl,
   TouchableOpacity,
   TextInput,
+  Modal,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, G } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +20,7 @@ import {
   addWater,
   getStreak,
   getLatestWeight,
+  logWeight,
   getTodaysPlan,
   getWeeklyStats,
   DailyLog,
@@ -32,7 +34,7 @@ import { useCustomAlert } from '../contexts/AlertContext';
 
 export default function DashboardScreen() {
   const { showAlert } = useCustomAlert();
-
+  const router = useRouter();
 
   const { C } = useTheme();
   const [log, setLog] = useState<DailyLog | null>(null);
@@ -42,6 +44,10 @@ export default function DashboardScreen() {
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
   const [weekly, setWeekly] = useState<any>(null);
   const [refresh, setRefresh] = useState(false);
+
+  // Body weight popup
+  const [weightPopup, setWeightPopup] = useState(false);
+  const [weightInput, setWeightInput] = useState('');
 
   const [goalWater, setGoalWater] = useState('');
   const [goalProtein, setGoalProtein] = useState('');
@@ -103,6 +109,19 @@ export default function DashboardScreen() {
     setGoalCalories('');
     load();
     showAlert('Saved', 'Your intake goals were updated.');
+  };
+
+  const handleLogWeight = () => {
+    const w = parseFloat(weightInput);
+    if (isNaN(w) || w <= 0) {
+      showAlert('Invalid', 'Enter a valid body weight in kg.');
+      return;
+    }
+    logWeight(w);
+    setWeightInput('');
+    setWeightPopup(false);
+    load();
+    showAlert('Weight Logged ✓', `Body weight ${w} kg saved!`);
   };
 
   const habits = [
@@ -229,15 +248,17 @@ export default function DashboardScreen() {
               icon="barbell-outline"
               title="Workout"
               val={log.workout_completed ? 'Done' : 'Pending'}
-              sub={log.workout_completed ? 'Nice job!' : 'Waiting...'}
+              sub={log.workout_completed ? 'Tap to log more' : 'Tap to log'}
               color={log.workout_completed ? C.purple : C.muted}
+              onPress={() => router.push({ pathname: '/workouts', params: { openTab: 'Log' } })}
             />
             <OverviewCard
               icon="scale-outline"
               title="Body Weight"
               val={weight ? `${weight.toFixed(1)} kg` : '-- kg'}
-              sub={`Goal: ${goals.weight_goal} kg`}
+              sub={weight ? `Goal: ${goals.weight_goal} kg` : 'Tap to log'}
               color={C.water}
+              onPress={() => setWeightPopup(true)}
             />
           </View>
         </View>
@@ -381,6 +402,36 @@ export default function DashboardScreen() {
         </View>
 
       </ScrollView>
+
+      {/* Body Weight Popup */}
+      <Modal visible={weightPopup} transparent animationType="fade" onRequestClose={() => setWeightPopup(false)}>
+        <TouchableOpacity style={styles.bwOverlay} activeOpacity={1} onPress={() => setWeightPopup(false)}>
+          <TouchableOpacity activeOpacity={1} style={[styles.bwSheet, { backgroundColor: C.card }]} onPress={e => e.stopPropagation()}>
+            <View style={styles.bwHandle} />
+            <View style={[styles.bwIconWrap, { backgroundColor: C.water + '22' }]}>
+              <Ionicons name="scale-outline" size={30} color={C.water} />
+            </View>
+            <Text style={[styles.bwTitle, { color: C.text }]}>Log Body Weight</Text>
+            {weight && <Text style={[styles.bwCurrent, { color: C.muted }]}>Current: {weight.toFixed(1)} kg  •  Goal: {goals.weight_goal} kg</Text>}
+            <TextInput
+              style={[styles.bwInput, { backgroundColor: C.bg, color: C.text, borderColor: C.water }]}
+              placeholder="Enter weight in kg (e.g. 75.5)"
+              placeholderTextColor={C.muted}
+              keyboardType="decimal-pad"
+              value={weightInput}
+              onChangeText={setWeightInput}
+              autoFocus
+            />
+            <TouchableOpacity style={[styles.bwBtn, { backgroundColor: C.water }]} onPress={handleLogWeight}>
+              <Ionicons name="checkmark-circle" size={18} color="#fff" />
+              <Text style={styles.bwBtnTxt}>Save Weight</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setWeightPopup(false)} style={styles.bwCancel}>
+              <Text style={[styles.bwCancelTxt, { color: C.muted }]}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -388,13 +439,12 @@ export default function DashboardScreen() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Subcomponents for the new layout
 // ─────────────────────────────────────────────────────────────────────────────
-function OverviewCard({ icon, title, val, sub, color }: any) {
-  const { showAlert } = useCustomAlert();
-
+function OverviewCard({ icon, title, val, sub, color, onPress }: any) {
   const { C } = useTheme();
   const styles = makeStyles(C);
+  const Wrapper = onPress ? TouchableOpacity : View;
   return (
-    <View style={styles.ovCardWrap}>
+    <Wrapper style={styles.ovCardWrap} onPress={onPress} activeOpacity={0.82}>
       <Card accent={color}>
         <View style={styles.ovCard}>
           <View style={[styles.ovIconBox, { backgroundColor: color + '15' }]}>
@@ -405,7 +455,7 @@ function OverviewCard({ icon, title, val, sub, color }: any) {
           <Text style={styles.ovSub} numberOfLines={1}>{sub}</Text>
         </View>
       </Card>
-    </View>
+    </Wrapper>
   );
 }
 
@@ -559,4 +609,17 @@ function makeStyles(C: any) { return StyleSheet.create({
     elevation: 2,
   },
   reminderTxt: { fontSize: 12, fontWeight: '700' },
+
+  // Body Weight Popup
+  bwOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
+  bwSheet: { width: '100%', borderRadius: 24, padding: 24, alignItems: 'center' },
+  bwHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(150,150,150,0.3)', marginBottom: 16 },
+  bwIconWrap: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  bwTitle: { fontSize: 20, fontWeight: '800', marginBottom: 6 },
+  bwCurrent: { fontSize: 12, marginBottom: 16, textAlign: 'center' },
+  bwInput: { width: '100%', borderRadius: 14, borderWidth: 2, paddingHorizontal: 16, paddingVertical: 14, fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
+  bwBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 15, borderRadius: 16, marginBottom: 10 },
+  bwBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  bwCancel: { paddingVertical: 8 },
+  bwCancelTxt: { fontSize: 14, fontWeight: '600' },
 }); }

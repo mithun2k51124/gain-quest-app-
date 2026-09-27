@@ -388,7 +388,7 @@ export default function OverallScreen() {
 
         {/* ── 4 Modern Elevated Metric Cards ── */}
         {rings.map(ring => (
-          <View key={ring.key} style={[styles.modernMetricCard, { borderLeftColor: ring.color }]}>
+          <View key={ring.key} style={styles.modernMetricCard}>
             <View style={styles.metricCardHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <View style={[styles.metricIconBox, { backgroundColor: ring.color + '1A', borderColor: ring.color + '44' }]}>
@@ -645,7 +645,6 @@ function makeStyles(C: any, isDark: boolean) {
       marginBottom: 12,
       borderWidth: 1,
       borderColor: C.border,
-      borderLeftWidth: 4,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 3 },
       shadowOpacity: 0.08,

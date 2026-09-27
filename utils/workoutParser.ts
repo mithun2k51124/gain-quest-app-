@@ -155,10 +155,12 @@ function resolveExercise(raw: string): { name: string; muscle: string } | null {
   };
 }
 
-// Number word map
+// Comprehensive word-to-number map for speech recognition
 const WORD_NUMS: Record<string, number> = {
-  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
-  nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20,
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+  sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+  twentyfive: 25, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100,
 };
 
 function parseNum(s: string): number | null {
@@ -169,25 +171,26 @@ function parseNum(s: string): number | null {
 }
 
 function normalizeText(text: string): string {
-  return text
-    .toLowerCase()
+  let s = text.toLowerCase();
+
+  // Convert spoken number words to digits (e.g., "three" -> "3", "ten" -> "10")
+  for (const [w, n] of Object.entries(WORD_NUMS)) {
+    s = s.replace(new RegExp(`\\b${w}\\b`, 'gi'), String(n));
+  }
+
+  return s
     .replace(/\bkilograms?\b/g, 'kg')
     .replace(/\bkilos?\b/g, 'kg')
     .replace(/\bpounds?\b/g, 'lbs')
     .replace(/\brepetitions?\b/g, 'reps')
-    .replace(/\bset\b/g, 'sets')
-    .replace(/\bof\b/g, ' ')
-    .replace(/\bat\b/g, ' ')
-    .replace(/\bwith\b/g, ' ')
-    .replace(/\busing\b/g, ' ')
-    .replace(/\bfor\b/g, ' ')
-    .replace(/\band\b/g, ' ')
-    .replace(/\bdid\b/g, ' ')
-    .replace(/\bjust\b/g, ' ')
-    .replace(/\bi\b/g, ' ')
-    .replace(/\btoday\b/g, ' ')
-    .replace(/\bsome\b/g, ' ')
-    .replace(/\ba\b/g, ' ')
+    .replace(/\brep\b/g, 'reps')
+    .replace(/\bby\b/g, 'x')
+    .replace(/\binto\b/g, 'x')
+    .replace(/\btimes\b/g, 'x')
+    // Spoken sets & reps patterns
+    .replace(/(\d+)\s*sets?\s*(?:of)?\s*(\d+)\s*reps?/gi, '$1 sets $2 reps')
+    .replace(/(\d+)\s*sets?\s+of\s+(\d+)\b(?!\s*kg|\s*lbs)/gi, '$1 sets $2 reps')
+    .replace(/(\d+)\s*sets?\s+(\d+)\b(?!\s*kg|\s*lbs)/gi, '$1 sets $2 reps')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -198,14 +201,10 @@ export function parseWorkoutText(input: string): ParseResult {
 
   const normalized = normalizeText(raw);
 
-  // ── Pattern 1: "<sets> sets [of] <exercise> [of/at/with] <weight> [kg/lbs] [x <reps> reps]"
-  // ── Pattern 2: "<exercise> <weight> kg <sets> sets <reps> reps"
-  // ── Pattern 3: "<sets> x <reps> <exercise> <weight> kg"
-
   const exercises: ParsedExercise[] = [];
 
   // Split on conjunctions that separate different exercises
-  const segments = normalized.split(/\s*(?:,\s*(?:and\s*)?|;\s*|then\s+)/);
+  const segments = normalized.split(/\s*(?:,\s*(?:and\s*)?|;\s*|then\s+|\s+and\s+then\s+)/);
 
   for (const seg of segments) {
     const s = seg.trim();
@@ -215,39 +214,70 @@ export function parseWorkoutText(input: string): ParseResult {
     let reps: number | null = null;
     let weight: number | null = null;
     let unit: 'kg' | 'lbs' = 'kg';
-    let exerciseRaw = '';
 
-    // Extract weight + unit
-    const weightMatch = s.match(/(\d+(?:\.\d+)?)\s*(kg|lbs)/);
+    // 1. Extract weight + unit: e.g. "80kg" or "100 kg" or "150 lbs"
+    const weightMatch = s.match(/(\d+(?:\.\d+)?)\s*(kg|lbs)/i);
     if (weightMatch) {
       weight = parseFloat(weightMatch[1]);
-      unit = weightMatch[2] as 'kg' | 'lbs';
+      unit = weightMatch[2].toLowerCase() as 'kg' | 'lbs';
     }
 
-    // Extract sets: "N sets" or "N x"
-    const setsMatch = s.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sets/i)
-      || s.match(/(\d+)\s*[xX×]\s*\d+/);
-    if (setsMatch) sets = parseNum(setsMatch[1]);
-
-    // Extract reps: "N reps" or "xN"
-    const repsMatch = s.match(/(\d+)\s*reps?/i)
-      || s.match(/[xX×]\s*(\d+)/);
-    if (repsMatch) reps = parseNum(repsMatch[1]);
-
-    // Extract "NxM" pattern (sets x reps)
-    const sxrMatch = s.match(/(\d+)\s*[xX×]\s*(\d+)/);
-    if (sxrMatch && !sets && !reps) {
-      sets = parseInt(sxrMatch[1]);
-      reps = parseInt(sxrMatch[2]);
+    // 2. Pattern: "N sets M reps" or "M reps N sets"
+    const setsRepsMatch = s.match(/(\d+)\s*sets?\s*(?:of|and|with|for)?\s*(\d+)\s*reps?/i);
+    if (setsRepsMatch) {
+      sets = parseInt(setsRepsMatch[1]);
+      reps = parseInt(setsRepsMatch[2]);
+    } else {
+      const repsSetsMatch = s.match(/(\d+)\s*reps?\s*(?:for|in|of|and)?\s*(\d+)\s*sets?/i);
+      if (repsSetsMatch) {
+        reps = parseInt(repsSetsMatch[1]);
+        sets = parseInt(repsSetsMatch[2]);
+      }
     }
 
-    // Guess exercise: remove numbers, units, sets/reps words
-    exerciseRaw = s
+    // 3. Pattern: "N x M" (e.g. 3x10, 3 x 10)
+    if (!sets || !reps) {
+      const sxrMatch = s.match(/(\d+)\s*[xX×]\s*(\d+)/);
+      if (sxrMatch) {
+        sets = parseInt(sxrMatch[1]);
+        reps = parseInt(sxrMatch[2]);
+      }
+    }
+
+    // 4. Standalone sets or reps if still missing
+    if (!sets) {
+      const sm = s.match(/(\d+)\s*sets?/i);
+      if (sm) sets = parseInt(sm[1]);
+    }
+    if (!reps) {
+      const rm = s.match(/(\d+)\s*reps?/i);
+      if (rm) reps = parseInt(rm[1]);
+    }
+
+    // 5. Look for remaining numbers if sets or reps is still null
+    if (sets && !reps) {
+      const nums = [...s.matchAll(/\b\d+\b/g)].map(m => parseInt(m[0]));
+      for (const num of nums) {
+        if (num !== sets && (!weight || num !== Math.round(weight))) {
+          reps = num;
+          break;
+        }
+      }
+    }
+
+    if (!sets && reps) {
+      sets = 1;
+    }
+
+    // Clean exercise name: remove numbers, units, sets/reps words, filler words
+    const exerciseRaw = s
       .replace(/\d+(?:\.\d+)?\s*(kg|lbs)/gi, '')
       .replace(/\d+\s*sets?/gi, '')
       .replace(/\d+\s*reps?/gi, '')
       .replace(/\d+\s*[xX×]\s*\d*/gi, '')
-      .replace(/[xX×]/g, '')
+      .replace(/\b\d+\b/g, '')
+      .replace(/[xX×]/g, ' ')
+      .replace(/\b(?:i|did|done|completed|for|and|at|with|using|today|sets|reps|of|some|a|an|the)\b/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -259,8 +289,8 @@ export function parseWorkoutText(input: string): ParseResult {
     exercises.push({
       exercise: resolved.name,
       muscleGroup: resolved.muscle,
-      sets: sets ?? 1,   // Never invent sets — default 1 if not mentioned
-      reps: reps ?? 0,   // Never invent reps — default 0 if not mentioned
+      sets: sets ?? 1,
+      reps: reps ?? 0,
       weight: weight ?? 0,
       unit,
     });
