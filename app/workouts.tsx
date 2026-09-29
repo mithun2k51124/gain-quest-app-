@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Svg, { Path, Rect, Circle } from 'react-native-svg';
 import {
   View,
@@ -9,8 +9,9 @@ import {
   TextInput,
   RefreshControl,
   Modal,
+  LayoutChangeEvent,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -570,7 +571,14 @@ export default function WorkoutsScreen() {
 
   const { C, isDark } = useTheme();
   const styles = makeStyles(C);
-  const [tab, setTab] = useState<Tab>('Planner');
+  const { openTab, scrollToDay } = useLocalSearchParams<{ openTab?: string; scrollToDay?: string }>();
+  const [tab, setTab] = useState<Tab>((openTab as Tab) || 'Planner');
+  // Keep tab in sync when screen re-focuses with a different openTab param
+  useEffect(() => {
+    if (openTab && ['Planner', 'Log', 'Muscles', 'History'].includes(openTab)) {
+      setTab(openTab as Tab);
+    }
+  }, [openTab]);
   const [plans, setPlans] = useState<WorkoutPlan[]>([]);
   const [planExercises, setPlanExercises] = useState<WorkoutPlanExercise[]>([]);
   const [muscles, setMuscles] = useState<MuscleEntry[]>([]);
@@ -618,6 +626,22 @@ export default function WorkoutsScreen() {
       load();
     }, [load])
   );
+
+  // Planner day scroll ref
+  const plannerScrollRef = useRef<any>(null);
+  const dayOffsets = useRef<Record<string, number>>({});
+
+  // When scrollToDay changes (edit button from home), switch to Planner and scroll
+  useEffect(() => {
+    if (scrollToDay && tab === 'Planner') {
+      setTimeout(() => {
+        const y = dayOffsets.current[scrollToDay as string];
+        if (y !== undefined && plannerScrollRef.current) {
+          plannerScrollRef.current.scrollTo({ y, animated: true });
+        }
+      }, 400);
+    }
+  }, [scrollToDay, tab]);
 
   const onRefresh = () => {
     setRefresh(true);
@@ -704,6 +728,7 @@ export default function WorkoutsScreen() {
       </View>
 
       <NestableScrollContainer
+        ref={plannerScrollRef}
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
       >
@@ -711,10 +736,10 @@ export default function WorkoutsScreen() {
           <PlannerTab
             plans={plans}
             planExercises={planExercises}
+            dayOffsets={dayOffsets}
             onSave={(day, name, mgs) => {
               updateWorkoutPlan(day, name, mgs);
               load();
-              // Show toast feedback
               setSavedDay(day);
               setTimeout(() => setSavedDay(null), 2000);
             }}
@@ -1150,12 +1175,14 @@ export default function WorkoutsScreen() {
 function PlannerTab({
   plans,
   planExercises,
+  dayOffsets,
   onSave,
   onAddExercise,
   onDeleteExercise,
 }: {
   plans: WorkoutPlan[];
   planExercises: WorkoutPlanExercise[];
+  dayOffsets?: React.MutableRefObject<Record<string, number>>;
   onSave: (d: string, n: string, m: string) => void;
   onAddExercise: (day: string, exercise: string, muscle: string) => void;
   onDeleteExercise: (id: number) => void;
@@ -1201,7 +1228,13 @@ function PlannerTab({
         const exercisesForDay = planExercises.filter(ex => ex.day_of_week === day);
 
         return (
-          <View key={day} style={[styles.planCard, isToday && styles.planCardToday]}>
+          <View
+            key={day}
+            style={[styles.planCard, isToday && styles.planCardToday]}
+            onLayout={(e: LayoutChangeEvent) => {
+              if (dayOffsets) dayOffsets.current[day] = e.nativeEvent.layout.y;
+            }}
+          >
             <View style={styles.planHeader}>
               <Text style={[styles.planDay, isToday && { color: C.accent }]}>
                 {isToday ? '▶ ' : ''}{day}

@@ -49,9 +49,7 @@ export default function DashboardScreen() {
   const [weightPopup, setWeightPopup] = useState(false);
   const [weightInput, setWeightInput] = useState('');
 
-  const [goalWater, setGoalWater] = useState('');
-  const [goalProtein, setGoalProtein] = useState('');
-  const [goalCalories, setGoalCalories] = useState('');
+
 
   const load = useCallback(() => {
     setLog(getTodayLog());
@@ -82,34 +80,6 @@ export default function DashboardScreen() {
   const proteinPct = Math.min((log.protein_intake || 0) / goals.protein_goal, 1);
   const calPct = Math.min((log.calorie_intake || 0) / goals.calorie_goal, 1);
 
-  const saveHomeGoals = () => {
-    const next: Partial<Goals> = {};
-
-    if (goalWater.trim()) {
-      const value = parseFloat(goalWater);
-      if (!isNaN(value) && value > 0) next.water_goal = value;
-    }
-    if (goalProtein.trim()) {
-      const value = parseFloat(goalProtein);
-      if (!isNaN(value) && value > 0) next.protein_goal = value;
-    }
-    if (goalCalories.trim()) {
-      const value = parseInt(goalCalories, 10);
-      if (!isNaN(value) && value > 0) next.calorie_goal = value;
-    }
-
-    if (!Object.keys(next).length) {
-      showAlert('No changes', 'Enter at least one intake goal.');
-      return;
-    }
-
-    updateGoals(next);
-    setGoalWater('');
-    setGoalProtein('');
-    setGoalCalories('');
-    load();
-    showAlert('Saved', 'Your intake goals were updated.');
-  };
 
   const handleLogWeight = () => {
     const w = parseFloat(weightInput);
@@ -188,41 +158,70 @@ export default function DashboardScreen() {
         {plan && (
           <View style={styles.section}>
             <SectionHeader title="Today's Workout" />
-            <Card accent={C.purple}>
-              <View style={styles.workoutRow}>
-                <View style={styles.workoutIconWrap}>
-                  <Ionicons name="barbell-outline" size={24} color={C.purple} />
-                </View>
-                <View style={{ flex: 1, paddingLeft: 12 }}>
-                  <Text style={styles.workoutName}>{plan.plan_name}</Text>
-                  <View style={styles.mgRow}>
-                    {plan.muscle_groups
+            {/* Full card is tappable → Log tab */}
+            <TouchableOpacity
+              activeOpacity={0.82}
+              onPress={() => router.push({ pathname: '/workouts', params: { openTab: 'Log' } } as any)}
+            >
+              <Card accent={C.purple}>
+                <View style={styles.workoutCardInner}>
+                  {/* ── Top row: icon | name | actions (edit + badge) ── */}
+                  <View style={styles.workoutTopRow}>
+                    <View style={styles.workoutIconWrap}>
+                      <Ionicons name="barbell-outline" size={22} color={C.purple} />
+                    </View>
+                    <Text style={styles.workoutName} numberOfLines={1}>{plan.plan_name || 'Workout'}</Text>
+                    <View style={styles.workoutActions}>
+                      {/* Edit plan button */}
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+                          router.push({ pathname: '/workouts', params: { openTab: 'Planner', scrollToDay: dayName } } as any);
+                        }}
+                        style={styles.editPlanBtn}
+                        activeOpacity={0.75}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="create-outline" size={16} color={C.purple} />
+                      </TouchableOpacity>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          { backgroundColor: log.workout_completed ? C.greenDim : C.accentDim },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            color: log.workout_completed ? C.green : C.muted,
+                            fontWeight: '700',
+                            fontSize: 11,
+                          }}
+                        >
+                          {log.workout_completed ? '✓ Done' : 'Tap to Log'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* ── Tags row: wraps freely across the entire card width below ── */}
+                  {(() => {
+                    const mgs = (plan.muscle_groups || '')
                       .split(',')
                       .map(g => g.trim())
-                      .filter(Boolean)
-                      .map(g => (
-                        <MuscleTag key={g} name={g} />
-                      ))}
-                  </View>
+                      .filter(Boolean);
+                    if (mgs.length === 0) return null;
+                    return (
+                      <View style={styles.mgRow}>
+                        {mgs.map(g => (
+                          <MuscleTag key={g} name={g} />
+                        ))}
+                      </View>
+                    );
+                  })()}
                 </View>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: log.workout_completed ? C.greenDim : C.accentDim },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      color: log.workout_completed ? C.green : C.muted,
-                      fontWeight: '700',
-                      fontSize: 12,
-                    }}
-                  >
-                    {log.workout_completed ? '✓ Completed' : 'Pending'}
-                  </Text>
-                </View>
-              </View>
-            </Card>
+              </Card>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -243,6 +242,7 @@ export default function DashboardScreen() {
               val={log.creatine_taken ? 'Taken' : 'Not Logged'}
               sub={log.creatine_taken ? 'Logged today' : 'Tap to log'}
               color={log.creatine_taken ? C.green : C.red}
+              onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'creatine' } } as any)}
             />
             <OverviewCard
               icon="barbell-outline"
@@ -268,63 +268,32 @@ export default function DashboardScreen() {
           <SectionHeader title="Intake Goals" />
           <Card>
             <View style={styles.intakeContainer}>
-              {/* Left Column - Progress */}
-              <View style={styles.intakeLeft}>
-                <MacroProgress
-                  icon="water-outline"
-                  name="Water"
-                  val={`${log.water_intake.toFixed(2)} / ${goals.water_goal} L`}
-                  pct={waterPct}
-                  color={C.water}
-                />
-                <View style={styles.divider} />
-                <MacroProgress
-                  icon="restaurant-outline"
-                  name="Protein"
-                  val={`${Math.round(log.protein_intake)} / ${goals.protein_goal} g`}
-                  pct={proteinPct}
-                  color={C.protein}
-                />
-                <View style={styles.divider} />
-                <MacroProgress
-                  icon="flame-outline"
-                  name="Calories"
-                  val={`${log.calorie_intake} / ${goals.calorie_goal} kcal`}
-                  pct={calPct}
-                  color={C.calories}
-                />
-              </View>
-
-              {/* Right Column - Inputs */}
-              <View style={styles.intakeRight}>
-                <TextInput
-                  style={styles.intakeInput}
-                  placeholder={`Water: ${goals.water_goal} L`}
-                  placeholderTextColor={C.muted}
-                  keyboardType="decimal-pad"
-                  value={goalWater}
-                  onChangeText={setGoalWater}
-                />
-                <TextInput
-                  style={styles.intakeInput}
-                  placeholder={`Protein: ${goals.protein_goal} g`}
-                  placeholderTextColor={C.muted}
-                  keyboardType="numeric"
-                  value={goalProtein}
-                  onChangeText={setGoalProtein}
-                />
-                <TextInput
-                  style={styles.intakeInput}
-                  placeholder={`Calories: ${goals.calorie_goal} kcal`}
-                  placeholderTextColor={C.muted}
-                  keyboardType="numeric"
-                  value={goalCalories}
-                  onChangeText={setGoalCalories}
-                />
-                <TouchableOpacity style={styles.saveBtn} onPress={saveHomeGoals}>
-                  <Text style={styles.saveBtnText}>Save Goals</Text>
-                </TouchableOpacity>
-              </View>
+              <MacroProgress
+                icon="water-outline"
+                name="Water"
+                val={`${log.water_intake.toFixed(2)} / ${goals.water_goal} L`}
+                pct={waterPct}
+                color={C.water}
+                onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'water' } } as any)}
+              />
+              <View style={styles.divider} />
+              <MacroProgress
+                icon="restaurant-outline"
+                name="Protein"
+                val={`${Math.round(log.protein_intake)} / ${goals.protein_goal} g`}
+                pct={proteinPct}
+                color={C.protein}
+                onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'nutrition' } } as any)}
+              />
+              <View style={styles.divider} />
+              <MacroProgress
+                icon="flame-outline"
+                name="Calories"
+                val={`${log.calorie_intake} / ${goals.calorie_goal} kcal`}
+                pct={calPct}
+                color={C.calories}
+                onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'nutrition' } } as any)}
+              />
             </View>
           </Card>
         </View>
@@ -459,7 +428,7 @@ function OverviewCard({ icon, title, val, sub, color, onPress }: any) {
   );
 }
 
-function MacroProgress({ icon, name, val, pct, color }: any) {
+function MacroProgress({ icon, name, val, pct, color, onPress }: any) {
   const { showAlert } = useCustomAlert();
 
   const { C } = useTheme();
@@ -470,8 +439,10 @@ function MacroProgress({ icon, name, val, pct, color }: any) {
   const circ = 2 * Math.PI * r;
   const offset = circ - (circ * Math.min(Math.max(pct, 0), 1));
 
+  const Wrapper = onPress ? TouchableOpacity : View;
+
   return (
-    <View style={styles.macroProgressRow}>
+    <Wrapper onPress={onPress} activeOpacity={0.78} style={styles.macroProgressRow}>
       <View style={styles.macroIconWrap}>
         <Ionicons name={icon} size={24} color={color} />
       </View>
@@ -493,7 +464,12 @@ function MacroProgress({ icon, name, val, pct, color }: any) {
           <Text style={[styles.macroRingTxt, { color }]}>{Math.round(pct * 100)}%</Text>
         </View>
       </View>
-    </View>
+      {onPress && (
+        <View style={{ justifyContent: 'center', paddingLeft: 4 }}>
+          <Ionicons name="chevron-forward" size={14} color={color} style={{ opacity: 0.6 }} />
+        </View>
+      )}
+    </Wrapper>
   );
 }
 
@@ -517,16 +493,62 @@ function makeStyles(C: any) { return StyleSheet.create({
   scroll: { padding: 16, paddingBottom: 40 },
   section: { marginBottom: 20 },
 
-  // Workout
-  workoutRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
-  workoutIconWrap: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: C.purple + '22',
-    alignItems: 'center', justifyContent: 'center'
+  // Workout Card
+  workoutCardInner: {
+    padding: 16,
   },
-  workoutName: { fontSize: 16, fontWeight: '800', color: C.purple, marginBottom: 6 },
-  mgRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  statusBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  workoutTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  workoutIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: C.purple + '22',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  workoutName: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '800',
+    color: C.purple,
+    marginRight: 8,
+  },
+  workoutActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  editPlanBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: C.purple + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.purple + '40',
+  },
+  statusBadge: {
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mgRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: C.border + '50',
+  },
 
   // Overview
   overviewGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
@@ -538,10 +560,8 @@ function makeStyles(C: any) { return StyleSheet.create({
   ovSub: { fontSize: 10, color: C.textSub, textAlign: 'center' },
 
   // Intake Goals
-  intakeContainer: { flexDirection: 'row', minHeight: 220 },
-  intakeLeft: { flex: 1.3, paddingVertical: 16, paddingLeft: 16, paddingRight: 8 },
-  intakeRight: { flex: 1, backgroundColor: C.surface, padding: 16, borderLeftWidth: 1, borderLeftColor: C.border, justifyContent: 'center' },
-  divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
+  intakeContainer: { paddingHorizontal: 16, paddingVertical: 16 },
+  divider: { height: 1, backgroundColor: C.border, marginVertical: 14 },
   macroProgressRow: { flexDirection: 'row', alignItems: 'center' },
   macroIconWrap: { width: 32, alignItems: 'center' },
   macroName: { fontSize: 12, fontWeight: '700', color: C.text, marginBottom: 2 },
@@ -559,18 +579,6 @@ function makeStyles(C: any) { return StyleSheet.create({
     fontSize: 11,
     marginBottom: 12,
   },
-  saveBtn: {
-    backgroundColor: C.accent,
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    shadowColor: '#BFC8D6',
-    shadowOffset: { width: 2, height: 2 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  saveBtnText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
 
   // Two Column Layout
   twoColSection: { flexDirection: 'row', gap: 12, marginBottom: 20 },

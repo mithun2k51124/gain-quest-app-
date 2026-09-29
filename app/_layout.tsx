@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { View, Text } from 'react-native';
+import { View, Text, Animated, StyleSheet, Pressable } from 'react-native';
 import { Tabs, useRouter, usePathname } from 'expo-router';
 
 import { StatusBar } from 'expo-status-bar';
@@ -34,6 +34,105 @@ const getTabIndex = (path: string): number => {
   if (path.startsWith('/settings')) return 6;
   return -1;
 };
+
+// Tab definitions — single source of truth
+const TAB_DEFS = [
+  { name: 'index',     label: 'Home',      icon: 'grid-outline' as const },
+  { name: 'tracker',   label: 'Tracker',   icon: 'clipboard-outline' as const },
+  { name: 'overall',   label: 'Overall',   icon: 'speedometer-outline' as const },
+  { name: 'workouts',  label: 'Workouts',  icon: 'barbell-outline' as const },
+  { name: 'prs',       label: 'PRs',       icon: 'trophy-outline' as const },
+  { name: 'analytics', label: 'Analytics', icon: 'stats-chart-outline' as const },
+  { name: 'settings',  label: 'Settings',  icon: 'settings-outline' as const },
+];
+
+// Custom tab button: full-width colored indicator line + spring press animation
+function CustomTabButton({
+  children,
+  onPress,
+  onLongPress,
+  accessibilityState,
+  accentColor,
+  inactiveColor,
+}: any) {
+  const isActive = accessibilityState?.selected;
+  const scaleAnim = useMemo(() => new Animated.Value(1), []);
+
+  const handlePressIn = useCallback(() => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.85,
+      useNativeDriver: true,
+      speed: 30,
+      bounciness: 6,
+    }).start();
+  }, [scaleAnim]);
+
+  const handlePressOut = useCallback(() => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 10,
+    }).start();
+  }, [scaleAnim]);
+
+  const lineColor = isActive ? accentColor : 'transparent';
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      android_ripple={{ color: `${accentColor}33`, borderless: false }}
+      style={tabStyles.buttonOuter}
+      accessibilityRole="button"
+      accessibilityState={accessibilityState}
+    >
+      {/* Full-width indicator line at top */}
+      <View
+        style={[
+          tabStyles.indicatorLine,
+          {
+            backgroundColor: lineColor,
+            shadowColor: lineColor,
+            shadowOpacity: isActive ? 0.9 : 0,
+            shadowRadius: 5,
+            shadowOffset: { width: 0, height: 1 },
+            elevation: isActive ? 5 : 0,
+          },
+        ]}
+      />
+      {/* Icon + label with spring scale */}
+      <Animated.View
+        style={[tabStyles.tabContent, { transform: [{ scale: scaleAnim }] }]}
+      >
+        {children}
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+const tabStyles = StyleSheet.create({
+  buttonOuter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    overflow: 'hidden',
+  },
+  indicatorLine: {
+    width: '100%',
+    height: 3,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
+  },
+  tabContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+});
 
 export default function RootLayout() {
   return (
@@ -129,9 +228,11 @@ function RootLayoutInner() {
                 backgroundColor: C.bg,
                 borderTopColor: C.border,
                 borderTopWidth: 1,
-                height: 60,
-                paddingBottom: 8,
-                shadowColor: '#BFC8D6',
+                // Taller bar so all 7 tabs (icon + label) are fully visible
+                height: 68,
+                paddingBottom: 0,
+                paddingTop: 0,
+                shadowColor: isDark ? '#000000' : '#BFC8D6',
                 shadowOffset: { width: 0, height: -4 },
                 shadowOpacity: 0.8,
                 shadowRadius: 10,
@@ -139,78 +240,40 @@ function RootLayoutInner() {
               },
               tabBarActiveTintColor: C.accent,
               tabBarInactiveTintColor: C.muted,
-              tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
+              tabBarLabelStyle: {
+                fontSize: 9,
+                fontWeight: '600',
+                marginTop: 0,
+                marginBottom: 4,
+              },
+              tabBarIconStyle: {
+                marginTop: 2,
+              },
+              tabBarItemStyle: {
+                paddingHorizontal: 0,
+                paddingVertical: 0,
+              },
             }}
           >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: 'Home',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="grid-outline" size={size} color={color} />
-            ),
-          }}
-        />
-
-        <Tabs.Screen
-          name="tracker"
-          options={{
-            title: 'Tracker',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="clipboard-outline" size={size} color={color} />
-            ),
-          }}
-        />
-
-        <Tabs.Screen
-          name="overall"
-          options={{
-            title: 'Overall',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="speedometer-outline" size={size} color={color} />
-            ),
-          }}
-        />
-
-        <Tabs.Screen
-          name="workouts"
-          options={{
-            title: 'Workouts',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="barbell-outline" size={size} color={color} />
-            ),
-          }}
-        />
-
-        <Tabs.Screen
-          name="prs"
-          options={{
-            title: 'PRs',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="trophy-outline" size={size} color={color} />
-            ),
-          }}
-        />
-
-        <Tabs.Screen
-          name="analytics"
-          options={{
-            title: 'Analytics',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="stats-chart-outline" size={size} color={color} />
-            ),
-          }}
-        />
-
-        <Tabs.Screen
-          name="settings"
-          options={{
-            title: 'Settings',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="settings-outline" size={size} color={color} />
-            ),
-          }}
-        />
+        {TAB_DEFS.map((tab) => (
+          <Tabs.Screen
+            key={tab.name}
+            name={tab.name}
+            options={{
+              title: tab.label,
+              tabBarIcon: ({ color }) => (
+                <Ionicons name={tab.icon} size={20} color={color} />
+              ),
+              tabBarButton: (props) => (
+                <CustomTabButton
+                  {...props}
+                  accentColor={C.accent}
+                  inactiveColor={C.muted}
+                />
+              ),
+            }}
+          />
+        ))}
       </Tabs>
         </View>
       </GestureDetector>

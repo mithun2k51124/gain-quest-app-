@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,8 +7,10 @@ import {
   TouchableOpacity,
   TextInput,
   RefreshControl,
+  LayoutChangeEvent,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -49,6 +51,11 @@ export default function TrackerScreen() {
   const [lastWaterAdd, setLastWaterAdd] = useState(0);
   const [foodModal, setFoodModal] = useState(false);
 
+  // Section scroll-to
+  const { openSection } = useLocalSearchParams<{ openSection?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const sectionOffsets = useRef<Record<string, number>>({});
+
   const load = useCallback(() => {
     setLog(getTodayLog());
     setGoals(getGoals());
@@ -58,7 +65,17 @@ export default function TrackerScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load])
+      // Scroll to section if openSection param is provided
+      if (openSection) {
+        setTimeout(() => {
+          const key = openSection as string;
+          const y = sectionOffsets.current[key];
+          if (y !== undefined && scrollRef.current) {
+            scrollRef.current.scrollTo({ y, animated: true });
+          }
+        }, 300);
+      }
+    }, [load, openSection])
   );
 
   const onRefresh = () => {
@@ -144,10 +161,12 @@ export default function TrackerScreen() {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
       >
-        <SectionHeader title="Water Intake" icon="water-outline" />
+        <View onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['water'] = e.nativeEvent.layout.y; }}>
+          <SectionHeader title="Water Intake" icon="water-outline" />
         <Card accent={C.water}>
           <View style={styles.section}>
             <View style={styles.macroTopRow}>
@@ -205,8 +224,10 @@ export default function TrackerScreen() {
             </View>
           </View>
         </Card>
+        </View>
 
-        <SectionHeader title="Nutrition" icon="restaurant-outline" />
+        <View onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['nutrition'] = e.nativeEvent.layout.y; }}>
+          <SectionHeader title="Nutrition" icon="restaurant-outline" />
         <Card accent={C.protein}>
           <View style={styles.section}>
             <View style={styles.nutritionStats}>
@@ -261,6 +282,7 @@ export default function TrackerScreen() {
             )}
           </View>
         </Card>
+        </View>
 
         {/* ── Barcode & Nutrition Scanner (Above Creatine) ── */}
         <SectionHeader title="Scan & Calculate Macros" icon="barcode-outline" />
@@ -288,7 +310,8 @@ export default function TrackerScreen() {
           </View>
         </Card>
 
-        <SectionHeader title="Creatine" icon="flash-outline" />
+        <View onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['creatine'] = e.nativeEvent.layout.y; }}>
+          <SectionHeader title="Creatine" icon="flash-outline" />
         <Card accent={log.creatine_taken ? C.green : C.red}>
           <View style={styles.section}>
             <TouchableOpacity
@@ -322,6 +345,7 @@ export default function TrackerScreen() {
             </TouchableOpacity>
           </View>
         </Card>
+        </View>
 
         <SectionHeader title="Daily Habits" icon="checkmark-circle-outline" />
         <Card accent={C.accent}>

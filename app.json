@@ -7,6 +7,8 @@
     "icon": "./assets/image.png",
     "userInterfaceStyle": "dark",
     "splash": {
+      "image": "./assets/image.png",
+      "resizeMode": "contain",
       "backgroundColor": "#0A0E1A"
     },
     "ios": {
@@ -20,7 +22,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0A0E1A"
+        "backgroundColor": "#E2E6EF"
       },
       "package": "com.gainquest.app",
       "permissions": [
