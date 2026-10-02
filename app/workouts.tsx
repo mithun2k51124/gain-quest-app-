@@ -999,7 +999,7 @@ export default function WorkoutsScreen() {
                                 paddingVertical: 6,
                                 paddingHorizontal: 14,
                                 borderRadius: 12,
-                                backgroundColor: isSel ? C.red : (isDark ? '#1C2333' : '#E2E8F0'),
+                                backgroundColor: isSel ? C.red : (isDark ? C.card : '#E2E8F0'),
                                 borderWidth: 1,
                                 borderColor: isSel ? C.red : C.border,
                               }}

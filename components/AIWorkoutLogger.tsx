@@ -1109,7 +1109,7 @@ const styles = StyleSheet.create({
 // ── Styles ─────────────────────────────────────────────────────────────────────
 function makeStyles(C: any, isDark: boolean) {
   const glass = {
-    backgroundColor: isDark ? 'rgba(18,24,38,0.97)' : 'rgba(244,248,255,0.98)',
+    backgroundColor: isDark ? 'rgba(12,12,14,0.98)' : 'rgba(244,248,255,0.98)',
     borderWidth: 1,
     borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.85)',
   };
@@ -1120,7 +1120,7 @@ function makeStyles(C: any, isDark: boolean) {
     fabInner:   { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.accent, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 32 },
     fabLabel:   { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 0.3 },
 
-    backdrop:   { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDark ? 'rgba(3,6,12,0.65)' : 'rgba(0,0,0,0.35)' },
+    backdrop:   { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.35)' },
     sheet:      { position: 'absolute', bottom: 0, left: 0, right: 0, ...glass, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingBottom: 36, maxHeight: SH * 0.92, overflow: 'hidden' },
     handle:     { width: 44, height: 4, borderRadius: 2, backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.18)', alignSelf: 'center', marginTop: 12, marginBottom: 8 },
 

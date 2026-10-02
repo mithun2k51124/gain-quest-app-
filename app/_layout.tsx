@@ -170,12 +170,12 @@ function RootLayoutInner() {
   const panGesture = useMemo(() => {
     return Gesture.Pan()
       .runOnJS(true)
-      .activeOffsetX([-20, 20])
-      .failOffsetY([-18, 18])
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-35, 35])
       .onEnd((e) => {
-        const isQuickFling = Math.abs(e.velocityX) > 260 && Math.abs(e.translationX) > 16;
-        const isLongSwipe = Math.abs(e.translationX) > 48;
-        if (isQuickFling || isLongSwipe) {
+        const isQuickFling = Math.abs(e.velocityX) > 200 && Math.abs(e.translationX) > 16;
+        const isLongSwipe = Math.abs(e.translationX) > 40;
+        if ((isQuickFling || isLongSwipe) && Math.abs(e.translationX) > Math.abs(e.translationY)) {
           if (e.translationX < 0) {
             handleSwipeLeft();
           } else {

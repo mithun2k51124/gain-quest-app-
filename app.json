@@ -24,7 +24,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#E2E6EF"
       },
-      "package": "com.gainquest.app",
+      "package": "gain_quest.myapp",
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET",

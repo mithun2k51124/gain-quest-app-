@@ -24,21 +24,22 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 //   outer = dark shadow, inner wrapper = white shadow
 // ─────────────────────────────────────────────────────────────────────────────
 function neuShadow(C: any, intensity: 'raised' | 'flat' = 'raised') {
+  const isDark = C.bg === '#000000';
   if (intensity === 'flat') {
     return {
-      shadowColor: '#BFC8D6', // You might want to update this to C.shadowDark if it exists
-      shadowOffset: { width: 3, height: 3 },
-      shadowOpacity: 0.8,
-      shadowRadius: 6,
-      elevation: 3,
+      shadowColor: C.shadowDark || '#000000',
+      shadowOffset: { width: isDark ? 0 : 3, height: isDark ? 1 : 3 },
+      shadowOpacity: isDark ? 0.4 : 0.8,
+      shadowRadius: isDark ? 3 : 6,
+      elevation: isDark ? 1 : 3,
     };
   }
   return {
-    shadowColor: '#BFC8D6',
-    shadowOffset: { width: 6, height: 6 },
-    shadowOpacity: 0.9,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowColor: C.shadowDark || '#000000',
+    shadowOffset: { width: isDark ? 0 : 6, height: isDark ? 2 : 6 },
+    shadowOpacity: isDark ? 0.6 : 0.9,
+    shadowRadius: isDark ? 6 : 12,
+    elevation: isDark ? 2 : 8,
   };
 }
 
@@ -502,6 +503,8 @@ function makeStyles(C: any) { return StyleSheet.create({
     marginBottom: 14,
     overflow: 'hidden',
     position: 'relative',
+    borderWidth: 1,
+    borderColor: C.border,
   },
   cardHighlight: {
     position: 'absolute',
@@ -509,7 +512,7 @@ function makeStyles(C: any) { return StyleSheet.create({
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: C.bg === '#000000' ? 'transparent' : 'rgba(255, 255, 255, 0.2)',
     zIndex: 1,
   },
 
@@ -525,6 +528,8 @@ function makeStyles(C: any) { return StyleSheet.create({
     padding: 14,
     minWidth: (SW - 48) / 2,
     position: 'relative',
+    borderWidth: 1,
+    borderColor: C.border,
   },
   statCardHighlight: {
     position: 'absolute',
@@ -532,8 +537,8 @@ function makeStyles(C: any) { return StyleSheet.create({
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: '#FFFFFF',
-    opacity: 0.9,
+    backgroundColor: C.bg === '#000000' ? 'transparent' : '#FFFFFF',
+    opacity: C.bg === '#000000' ? 0 : 0.9,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
   },

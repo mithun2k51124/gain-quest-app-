@@ -214,7 +214,9 @@ export default function PRScreen() {
   // Modals
   const [allPRsModal, setAllPRsModal] = useState(false);
   const [logModal, setLogModal]     = useState(false);
-  const [logExPickerModal, setLogExPickerModal] = useState(false);
+  const [chartPickerModal, setChartPickerModal] = useState(false);
+  const [pickingForLog, setPickingForLog] = useState(false);
+  const [exSearch, setExSearch]     = useState('');
 
   // Log PR form
   const [logEx, setLogEx]           = useState('Bench Press');
@@ -314,7 +316,7 @@ export default function PRScreen() {
 
   const resetLogForm = () => {
     setLogModal(false); setLogWeight(''); setLogSets('3'); setLogReps('1');
-    setUseCustom(false); setCustomEx('');
+    setUseCustom(false); setCustomEx(''); setPickingForLog(false); setExSearch('');
   };
 
   const starredPRs = starred.map(n => prMap[n]).filter(Boolean);
@@ -461,7 +463,7 @@ export default function PRScreen() {
                 <Text style={styles.chartTitle}>{selEx}</Text>
                 {maxPoint && <Text style={styles.chartPeak}>Peak e1RM: {maxPoint.y} kg</Text>}
               </View>
-              <TouchableOpacity style={styles.changeBtn} onPress={() => setLogExPickerModal(true)}>
+              <TouchableOpacity style={styles.changeBtn} onPress={() => { setExSearch(''); setChartPickerModal(true); }}>
                 <Ionicons name="swap-horizontal-outline" size={14} color={C.accent} style={{ marginRight: 4 }} />
                 <Text style={styles.changeBtnTxt}>Change</Text>
               </TouchableOpacity>
@@ -567,19 +569,34 @@ export default function PRScreen() {
       </Modal>
 
       {/* ── Exercise Picker for Chart ── */}
-      <Modal visible={logExPickerModal} transparent animationType="slide" onRequestClose={() => setLogExPickerModal(false)}>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setLogExPickerModal(false)}>
+      <Modal visible={chartPickerModal} transparent animationType="slide" onRequestClose={() => setChartPickerModal(false)}>
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setChartPickerModal(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.sheet, { maxHeight: '85%' }]} onPress={e => e.stopPropagation()}>
             <View style={styles.handle} />
-            <Text style={styles.sheetTitle}>Select Exercise</Text>
+            <Text style={styles.sheetTitle}>Select Chart Exercise</Text>
+            <View style={styles.searchBox}>
+              <Ionicons name="search-outline" size={18} color={C.muted} style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search exercise..."
+                placeholderTextColor={C.muted}
+                value={exSearch}
+                onChangeText={setExSearch}
+              />
+              {exSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setExSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={18} color={C.muted} />
+                </TouchableOpacity>
+              )}
+            </View>
             <FlatList
-              data={exNames}
+              data={exNames.filter(e => e.toLowerCase().includes(exSearch.toLowerCase()))}
               keyExtractor={item => item}
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[styles.pickerRow, selEx === item && { backgroundColor: C.accentDim }]}
-                  onPress={() => { selectChart(item); setLogExPickerModal(false); }}
+                  onPress={() => { selectChart(item); setChartPickerModal(false); setExSearch(''); }}
                 >
                   <Text style={[styles.pickerTxt, selEx === item && { color: C.accent, fontWeight: '700' }]}>{item}</Text>
                   {selEx === item && <Ionicons name="checkmark" size={16} color={C.accent} />}
@@ -593,85 +610,141 @@ export default function PRScreen() {
       {/* ── Log PR Modal ── */}
       <Modal visible={logModal} transparent animationType="slide" onRequestClose={resetLogForm}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={resetLogForm}>
-          <TouchableOpacity activeOpacity={1} style={styles.sheet} onPress={e => e.stopPropagation()}>
+          <TouchableOpacity activeOpacity={1} style={[styles.sheet, pickingForLog && { maxHeight: '85%' }]} onPress={e => e.stopPropagation()}>
             <View style={styles.handle} />
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-              <Ionicons name="trophy" size={22} color={C.yellow} style={{ marginRight: 8 }} />
-              <Text style={[styles.sheetTitle, { marginBottom: 0 }]}>Log a PR</Text>
-            </View>
 
-            {/* Exercise */}
-            <Text style={styles.lbl}>Exercise</Text>
-            <View style={styles.exToggleRow}>
-              <TouchableOpacity style={[styles.exToggleBtn, !useCustom && { backgroundColor: C.accent }]} onPress={() => setUseCustom(false)}>
-                <Ionicons name="list-outline" size={14} color={!useCustom ? '#fff' : C.muted} style={{ marginRight: 4 }} />
-                <Text style={[styles.exToggleTxt, !useCustom && { color: '#fff' }]}>Pick</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.exToggleBtn, useCustom && { backgroundColor: C.accent }]} onPress={() => setUseCustom(true)}>
-                <Ionicons name="pencil-outline" size={14} color={useCustom ? '#fff' : C.muted} style={{ marginRight: 4 }} />
-                <Text style={[styles.exToggleTxt, useCustom && { color: '#fff' }]}>Custom</Text>
-              </TouchableOpacity>
-            </View>
-
-            {!useCustom ? (
-              <TouchableOpacity style={styles.exSelector} onPress={() => setLogExPickerModal(true)}>
-                <Text style={styles.exSelectorTxt}>{logEx}</Text>
-                <Ionicons name="chevron-down" size={18} color={C.accent} />
-              </TouchableOpacity>
-            ) : (
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. Hack Squat, Incline Curl…"
-                placeholderTextColor={C.muted}
-                value={customEx}
-                onChangeText={setCustomEx}
-                autoCapitalize="words"
-              />
-            )}
-
-            {/* Weight */}
-            <Text style={styles.lbl}>Weight</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <TextInput
-                style={[styles.input, { flex: 1, marginRight: 10 }]}
-                placeholder="e.g. 100"
-                placeholderTextColor={C.muted}
-                keyboardType="decimal-pad"
-                value={logWeight}
-                onChangeText={setLogWeight}
-              />
-              <View style={styles.unitToggle}>
-                {(['kg', 'lbs'] as const).map(u => (
-                  <TouchableOpacity key={u} style={[styles.unitBtn, logUnit === u && styles.unitActive]} onPress={() => setLogUnit(u)}>
-                    <Text style={[styles.unitTxt, logUnit === u && { color: '#fff' }]}>{u}</Text>
+            {pickingForLog ? (
+              <View style={{ flex: 1, minHeight: 360 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+                  <TouchableOpacity
+                    onPress={() => { setPickingForLog(false); setExSearch(''); }}
+                    style={{ padding: 6, marginRight: 8, borderRadius: 10, backgroundColor: C.bg }}
+                  >
+                    <Ionicons name="arrow-back" size={20} color={C.text} />
                   </TouchableOpacity>
-                ))}
-              </View>
-            </View>
+                  <Text style={[styles.sheetTitle, { marginBottom: 0, fontSize: 18 }]}>Select Exercise for PR</Text>
+                </View>
 
-            {/* Sets & Reps */}
-            <View style={{ flexDirection: 'row' }}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.lbl}>Sets</Text>
-                <TextInput style={styles.input} placeholder="3" placeholderTextColor={C.muted} keyboardType="numeric" value={logSets} onChangeText={setLogSets} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.lbl}>Reps</Text>
-                <TextInput style={styles.input} placeholder="1" placeholderTextColor={C.muted} keyboardType="numeric" value={logReps} onChangeText={setLogReps} />
-              </View>
-            </View>
+                <View style={styles.searchBox}>
+                  <Ionicons name="search-outline" size={18} color={C.muted} style={{ marginRight: 8 }} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search exercise (e.g. Squat, Curl)..."
+                    placeholderTextColor={C.muted}
+                    value={exSearch}
+                    onChangeText={setExSearch}
+                    autoFocus
+                  />
+                  {exSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setExSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close-circle" size={18} color={C.muted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
 
-            {/* e1RM preview */}
-            {logWeight.trim() && logReps.trim() && !isNaN(parseFloat(logWeight)) && !isNaN(parseInt(logReps)) && (
-              <View style={styles.e1rmPreview}>
-                <Text style={styles.e1rmLbl}>Estimated 1RM</Text>
-                <Text style={styles.e1rmVal}>{calc1RM(parseFloat(logWeight), parseInt(logReps,10)).toFixed(1)} kg</Text>
+                <FlatList
+                  data={exNames.filter(e => e.toLowerCase().includes(exSearch.toLowerCase()))}
+                  keyExtractor={item => item}
+                  showsVerticalScrollIndicator={false}
+                  renderItem={({ item }) => {
+                    const isSelected = logEx === item;
+                    return (
+                      <TouchableOpacity
+                        style={[styles.pickerRow, isSelected && { backgroundColor: C.accentDim }]}
+                        onPress={() => {
+                          setLogEx(item);
+                          setPickingForLog(false);
+                          setExSearch('');
+                        }}
+                      >
+                        <Text style={[styles.pickerTxt, isSelected && { color: C.accent, fontWeight: '700' }]}>{item}</Text>
+                        {isSelected && <Ionicons name="checkmark-circle" size={18} color={C.accent} />}
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
               </View>
+            ) : (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trophy" size={22} color={C.yellow} style={{ marginRight: 8 }} />
+                  <Text style={[styles.sheetTitle, { marginBottom: 0 }]}>Log a PR</Text>
+                </View>
+
+                {/* Exercise */}
+                <Text style={styles.lbl}>Exercise</Text>
+                <View style={styles.exToggleRow}>
+                  <TouchableOpacity style={[styles.exToggleBtn, !useCustom && { backgroundColor: C.accent }]} onPress={() => setUseCustom(false)}>
+                    <Ionicons name="list-outline" size={14} color={!useCustom ? '#fff' : C.muted} style={{ marginRight: 4 }} />
+                    <Text style={[styles.exToggleTxt, !useCustom && { color: '#fff' }]}>Pick</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.exToggleBtn, useCustom && { backgroundColor: C.accent }]} onPress={() => setUseCustom(true)}>
+                    <Ionicons name="pencil-outline" size={14} color={useCustom ? '#fff' : C.muted} style={{ marginRight: 4 }} />
+                    <Text style={[styles.exToggleTxt, useCustom && { color: '#fff' }]}>Custom</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {!useCustom ? (
+                  <TouchableOpacity style={styles.exSelector} onPress={() => { setExSearch(''); setPickingForLog(true); }}>
+                    <Text style={styles.exSelectorTxt}>{logEx}</Text>
+                    <Ionicons name="chevron-down" size={18} color={C.accent} />
+                  </TouchableOpacity>
+                ) : (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Hack Squat, Incline Curl…"
+                    placeholderTextColor={C.muted}
+                    value={customEx}
+                    onChangeText={setCustomEx}
+                    autoCapitalize="words"
+                  />
+                )}
+
+                {/* Weight */}
+                <Text style={styles.lbl}>Weight</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, marginRight: 10 }]}
+                    placeholder="e.g. 100"
+                    placeholderTextColor={C.muted}
+                    keyboardType="decimal-pad"
+                    value={logWeight}
+                    onChangeText={setLogWeight}
+                  />
+                  <View style={styles.unitToggle}>
+                    {(['kg', 'lbs'] as const).map(u => (
+                      <TouchableOpacity key={u} style={[styles.unitBtn, logUnit === u && styles.unitActive]} onPress={() => setLogUnit(u)}>
+                        <Text style={[styles.unitTxt, logUnit === u && { color: '#fff' }]}>{u}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Sets & Reps */}
+                <View style={{ flexDirection: 'row' }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.lbl}>Sets</Text>
+                    <TextInput style={styles.input} placeholder="3" placeholderTextColor={C.muted} keyboardType="numeric" value={logSets} onChangeText={setLogSets} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.lbl}>Reps</Text>
+                    <TextInput style={styles.input} placeholder="1" placeholderTextColor={C.muted} keyboardType="numeric" value={logReps} onChangeText={setLogReps} />
+                  </View>
+                </View>
+
+                {/* e1RM preview */}
+                {logWeight.trim() && logReps.trim() && !isNaN(parseFloat(logWeight)) && !isNaN(parseInt(logReps)) && (
+                  <View style={styles.e1rmPreview}>
+                    <Text style={styles.e1rmLbl}>Estimated 1RM</Text>
+                    <Text style={styles.e1rmVal}>{calc1RM(parseFloat(logWeight), parseInt(logReps,10)).toFixed(1)} kg</Text>
+                  </View>
+                )}
+
+                <Btn label="Save PR 🏆" color={C.accent} onPress={handleLogPR} />
+                <View style={{ height: 10 }} />
+                <Btn label="Cancel" color={C.muted} textColor={C.text} onPress={resetLogForm} />
+              </>
             )}
-
-            <Btn label="Save PR 🏆" color={C.accent} onPress={handleLogPR} />
-            <View style={{ height: 10 }} />
-            <Btn label="Cancel" color={C.muted} textColor={C.text} onPress={resetLogForm} />
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -690,7 +763,7 @@ function makeStyles(C: any) {
     scroll:       { padding: 16, paddingBottom: 60 },
 
     // Recent strip
-    recentCard:   { backgroundColor: C.card, borderRadius: 16, padding: 12, alignItems: 'center', minWidth: 110, elevation: 4, shadowColor: C.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.8, shadowRadius: 6 },
+    recentCard:   { backgroundColor: C.card, borderRadius: 16, padding: 12, alignItems: 'center', minWidth: 110, borderWidth: 1, borderColor: C.border, elevation: 4, shadowColor: C.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.8, shadowRadius: 6 },
     recentIconWrap:{ width: 28, height: 28, borderRadius: 8, backgroundColor: C.yellow + '22', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
     recentEx:     { fontSize: 11, fontWeight: '700', color: C.text, textAlign: 'center', maxWidth: 100 },
     recentWeight: { fontSize: 12, fontWeight: '800', marginTop: 2 },
@@ -698,7 +771,7 @@ function makeStyles(C: any) {
     recentDate:   { fontSize: 10, color: C.muted, marginTop: 2 },
 
     // PR Cards (starred)
-    prCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 14, marginBottom: 10, gap: 12, elevation: 6, shadowColor: C.shadowDark, shadowOffset: { width: 5, height: 5 }, shadowOpacity: 0.9, shadowRadius: 10 },
+    prCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 14, marginBottom: 10, gap: 12, borderWidth: 1, borderColor: C.border, elevation: 5, shadowColor: C.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.8, shadowRadius: 8 },
     prIcon:       { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     prName:       { fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 2 },
     pr1rm:        { fontSize: 11, color: C.yellow },
@@ -710,7 +783,7 @@ function makeStyles(C: any) {
     emptySub:     { fontSize: 12, color: C.muted, textAlign: 'center', marginTop: 6, lineHeight: 18 },
 
     // View All
-    viewAllBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.accentDim, borderRadius: 16, paddingVertical: 14, marginBottom: 4, marginTop: 4 },
+    viewAllBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.accentDim, borderRadius: 16, paddingVertical: 14, marginBottom: 4, marginTop: 4, borderWidth: 1, borderColor: C.accent + '44' },
     viewAllText:  { fontSize: 14, fontWeight: '700', color: C.accent, flex: 1, textAlign: 'center' },
 
     // Day PR
@@ -724,7 +797,7 @@ function makeStyles(C: any) {
     chartHead:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, paddingBottom: 0 },
     chartTitle:   { fontSize: 15, fontWeight: '700', color: C.text },
     chartPeak:    { fontSize: 11, color: C.yellow, marginTop: 2, fontWeight: '600' },
-    changeBtn:    { backgroundColor: C.accentDim, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center' },
+    changeBtn:    { backgroundColor: C.accentDim, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: C.accent + '33' },
     changeBtnTxt: { fontSize: 12, color: C.accent, fontWeight: '600' },
     table:        { marginHorizontal: 16, marginBottom: 16, borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: C.border },
     tr:           { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: C.border },
@@ -734,33 +807,35 @@ function makeStyles(C: any) {
     prRow:        { backgroundColor: C.greenDim },
 
     // Modal shared
-    overlay:      { flex: 1, backgroundColor: 'rgba(10,15,25,0.6)', justifyContent: 'flex-end' },
-    sheet:        { backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 40, elevation: 20, shadowColor: '#000', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.5, shadowRadius: 16 },
+    overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'flex-end' },
+    sheet:        { backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 40, borderWidth: 1, borderColor: C.border, elevation: 20, shadowColor: '#000', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.5, shadowRadius: 16 },
     handle:       { width: 40, height: 5, backgroundColor: C.border, borderRadius: 3, alignSelf: 'center', marginBottom: 16 },
     sheetTitle:   { fontSize: 20, fontWeight: '800', color: C.text, marginBottom: 16 },
     lbl:          { fontSize: 11, color: C.muted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6, marginTop: 10 },
 
     // Log modal
     exToggleRow:  { flexDirection: 'row', gap: 8, marginBottom: 10 },
-    exToggleBtn:  { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 12, backgroundColor: C.bg, elevation: 2, shadowColor: C.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.6, shadowRadius: 4 },
+    exToggleBtn:  { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 12, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, elevation: 2, shadowColor: C.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.6, shadowRadius: 4 },
     exToggleTxt:  { fontSize: 13, fontWeight: '700', color: C.muted },
-    exSelector:   { backgroundColor: C.bg, borderRadius: 14, padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 4, shadowColor: C.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.9, shadowRadius: 8 },
+    exSelector:   { backgroundColor: C.bg, borderRadius: 14, padding: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: C.border, elevation: 4, shadowColor: C.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.9, shadowRadius: 8 },
     exSelectorTxt:{ fontSize: 15, fontWeight: '700', color: C.text, flex: 1 },
-    input:        { backgroundColor: C.bg, borderRadius: 12, padding: 13, fontSize: 16, fontWeight: '700', color: C.text, elevation: 4, shadowColor: C.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.9, shadowRadius: 8 },
-    unitToggle:   { flexDirection: 'row', borderRadius: 12, overflow: 'hidden', elevation: 3, shadowColor: C.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.8, shadowRadius: 6 },
+    input:        { backgroundColor: C.bg, borderRadius: 12, padding: 13, fontSize: 16, fontWeight: '700', color: C.text, borderWidth: 1, borderColor: C.border, elevation: 4, shadowColor: C.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.9, shadowRadius: 8 },
+    unitToggle:   { flexDirection: 'row', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: C.border, elevation: 3, shadowColor: C.shadowDark, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.8, shadowRadius: 6 },
     unitBtn:      { paddingHorizontal: 14, paddingVertical: 13, backgroundColor: C.bg },
     unitActive:   { backgroundColor: C.accent },
     unitTxt:      { fontSize: 13, fontWeight: '700', color: C.textSub },
-    e1rmPreview:  { backgroundColor: C.accentDim, borderRadius: 12, padding: 12, marginTop: 12, marginBottom: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    e1rmPreview:  { backgroundColor: C.accentDim, borderRadius: 12, padding: 12, marginTop: 12, marginBottom: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: C.accent + '33' },
     e1rmLbl:      { fontSize: 12, color: C.accent, fontWeight: '600' },
     e1rmVal:      { fontSize: 18, fontWeight: '800', color: C.accent },
 
     // All PRs list
-    allRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.bg, borderRadius: 16, padding: 14, elevation: 2, shadowColor: C.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 4 },
+    allRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.bg, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: C.border, elevation: 2, shadowColor: C.shadowDark, shadowOffset: { width: 2, height: 2 }, shadowOpacity: 0.5, shadowRadius: 4 },
     starBtnLarge: { padding: 4 },
 
     // Picker
     pickerRow:    { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     pickerTxt:    { fontSize: 15, color: C.text, fontWeight: '500' },
+    searchBox:    { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 12, paddingHorizontal: 12, marginBottom: 12, borderWidth: 1, borderColor: C.border },
+    searchInput:  { flex: 1, paddingVertical: 10, fontSize: 14, color: C.text, fontWeight: '600' },
   });
 }

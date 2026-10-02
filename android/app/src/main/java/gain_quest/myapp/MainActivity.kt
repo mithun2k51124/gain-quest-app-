@@ -1,4 +1,4 @@
-package com.gainquest.app
+package gain_quest.myapp
 
 import android.os.Build
 import android.os.Bundle

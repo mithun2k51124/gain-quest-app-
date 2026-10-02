@@ -1,18 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   RefreshControl,
   LayoutChangeEvent,
+  PanResponder,
 } from 'react-native';
 
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import DraggableFlatList, {
+  ScaleDecorator,
+  RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import {
   getTodayLog,
   getGoals,
@@ -26,16 +29,29 @@ import {
   updateDailyLog,
   updateStreak,
   todayStr,
+  getSetting,
+  setSetting,
   DailyLog,
   Goals,
   FoodEntry,
 } from '../db/database';
-import { Card, Btn, ProgressBar, Ring, Toggle, PickerModal, SectionHeader } from '../components/ui';
+import { Card, Btn, ProgressBar, Ring, SectionHeader } from '../components/ui';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
-import { WATER_OPTIONS, FOOD_DB } from '../constants/theme';
+import { WATER_OPTIONS } from '../constants/theme';
 import FoodScannerModal from '../components/FoodScannerModal';
 import FoodSearchModal from '../components/FoodSearchModal';
+import { PickerModal } from '../components/ui';
+
+export type TrackerSectionKey = 'water' | 'nutrition' | 'scanner' | 'creatine' | 'habits';
+
+export const DEFAULT_TRACKER_SECTIONS: TrackerSectionKey[] = [
+  'water',
+  'nutrition',
+  'scanner',
+  'creatine',
+  'habits',
+];
 
 export default function TrackerScreen() {
   const { showAlert } = useCustomAlert();
@@ -51,9 +67,26 @@ export default function TrackerScreen() {
   const [lastWaterAdd, setLastWaterAdd] = useState(0);
   const [foodModal, setFoodModal] = useState(false);
 
+  // Widget custom ordering
+  const [isArranging, setIsArranging] = useState(false);
+  const [sections, setSections] = useState<TrackerSectionKey[]>(() => {
+    try {
+      const saved = getSetting('tracker_sections_order', '');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const valid = parsed.filter((k: any) => DEFAULT_TRACKER_SECTIONS.includes(k));
+          const missing = DEFAULT_TRACKER_SECTIONS.filter(k => !valid.includes(k));
+          return [...valid, ...missing];
+        }
+      }
+    } catch (_) {}
+    return DEFAULT_TRACKER_SECTIONS;
+  });
+
   // Section scroll-to
   const { openSection } = useLocalSearchParams<{ openSection?: string }>();
-  const scrollRef = useRef<ScrollView>(null);
+  const flatListRef = useRef<any>(null);
   const sectionOffsets = useRef<Record<string, number>>({});
 
   const load = useCallback(() => {
@@ -68,14 +101,20 @@ export default function TrackerScreen() {
       // Scroll to section if openSection param is provided
       if (openSection) {
         setTimeout(() => {
-          const key = openSection as string;
-          const y = sectionOffsets.current[key];
-          if (y !== undefined && scrollRef.current) {
-            scrollRef.current.scrollTo({ y, animated: true });
+          const idx = sections.indexOf(openSection as TrackerSectionKey);
+          if (idx !== -1 && flatListRef.current) {
+            try {
+              flatListRef.current.scrollToIndex({ index: idx, animated: true, viewPosition: 0.1 });
+            } catch (_) {
+              const y = sectionOffsets.current[openSection as string];
+              if (y !== undefined && flatListRef.current?.scrollToOffset) {
+                flatListRef.current.scrollToOffset({ offset: Math.max(0, y - 20), animated: true });
+              }
+            }
           }
-        }, 300);
+        }, 350);
       }
-    }, [load, openSection])
+    }, [load, openSection, sections])
   );
 
   const onRefresh = () => {
@@ -83,6 +122,50 @@ export default function TrackerScreen() {
     load();
     setRefresh(false);
   };
+
+  const handleDragEnd = ({ data }: { data: TrackerSectionKey[] }) => {
+    setSections(data);
+    try {
+      setSetting('tracker_sections_order', JSON.stringify(data));
+    } catch (_) {}
+  };
+
+  const handleResetLayout = () => {
+    setSections(DEFAULT_TRACKER_SECTIONS);
+    try {
+      setSetting('tracker_sections_order', JSON.stringify(DEFAULT_TRACKER_SECTIONS));
+    } catch (_) {}
+    showAlert('Reset ✓', 'Tracker layout restored to default.');
+  };
+
+  const router = useRouter();
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+          if (isArranging) return false;
+          return (
+            Math.abs(gestureState.dx) > 18 &&
+            Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5
+          );
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const isQuickFling = Math.abs(gestureState.vx) > 0.3 && Math.abs(gestureState.dx) > 15;
+          const isLongSwipe = Math.abs(gestureState.dx) > 40;
+          if (isQuickFling || isLongSwipe) {
+            if (gestureState.dx > 0) {
+              // Swiped right -> go to Home ('/')
+              router.navigate('/' as any);
+            } else if (gestureState.dx < 0) {
+              // Swiped left -> go to Overall ('/overall')
+              router.navigate('/overall' as any);
+            }
+          }
+        },
+      }),
+    [isArranging, router]
+  );
 
   const styles = makeStyles(C, isDark);
 
@@ -93,9 +176,9 @@ export default function TrackerScreen() {
 
   if (!log || !goals) return null;
 
-  const waterPct = Math.min(log.water_intake / goals.water_goal, 1);
-  const proteinPct = Math.min(log.protein_intake / goals.protein_goal, 1);
-  const calPct = Math.min(log.calorie_intake / goals.calorie_goal, 1);
+  const waterPct = Math.min((log.water_intake || 0) / goals.water_goal, 1);
+  const proteinPct = Math.min((log.protein_intake || 0) / goals.protein_goal, 1);
+  const calPct = Math.min((log.calorie_intake || 0) / goals.calorie_goal, 1);
 
   const handleAddWater = (mlStr: string) => {
     const ml = parseInt(mlStr, 10);
@@ -147,27 +230,26 @@ export default function TrackerScreen() {
     value: String(w.ml),
   }));
 
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Daily Tracker</Text>
-        <Text style={styles.headerDate}>
-          {new Date().toLocaleDateString('en-US', {
-            weekday: 'short',
-            month: 'short',
-            day: 'numeric',
-          })}
-        </Text>
+  // ─────────────────────────────────────────────────────────────────────────
+  // Section Renderers
+  // ─────────────────────────────────────────────────────────────────────────
+  const renderWaterSection = (drag: () => void, isActive: boolean) => (
+    <View
+      style={styles.sectionWrap}
+      onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['water'] = e.nativeEvent.layout.y; }}
+    >
+      <View style={styles.sectionHeaderRow}>
+        <SectionHeader title="Water Intake" icon="water-outline" />
+        <TouchableOpacity
+          onPressIn={drag}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={[styles.dragGripBtn, isActive && { backgroundColor: C.water + '25', borderColor: C.water }]}
+        >
+          <Ionicons name="reorder-two" size={20} color={isActive ? C.water : C.muted} />
+        </TouchableOpacity>
       </View>
-
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
-      >
-        <View onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['water'] = e.nativeEvent.layout.y; }}>
-          <SectionHeader title="Water Intake" icon="water-outline" />
-        <Card accent={C.water}>
+      <TouchableOpacity activeOpacity={1} onLongPress={drag} delayLongPress={220}>
+        <Card accent={C.water} style={isActive ? [styles.activeCardGlow, { borderColor: C.water }] : undefined}>
           <View style={styles.section}>
             <View style={styles.macroTopRow}>
               <Ring value={waterPct} color={C.water} size={72} />
@@ -224,11 +306,27 @@ export default function TrackerScreen() {
             </View>
           </View>
         </Card>
-        </View>
+      </TouchableOpacity>
+    </View>
+  );
 
-        <View onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['nutrition'] = e.nativeEvent.layout.y; }}>
-          <SectionHeader title="Nutrition" icon="restaurant-outline" />
-        <Card accent={C.protein}>
+  const renderNutritionSection = (drag: () => void, isActive: boolean) => (
+    <View
+      style={styles.sectionWrap}
+      onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['nutrition'] = e.nativeEvent.layout.y; }}
+    >
+      <View style={styles.sectionHeaderRow}>
+        <SectionHeader title="Nutrition" icon="restaurant-outline" />
+        <TouchableOpacity
+          onPressIn={drag}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={[styles.dragGripBtn, isActive && { backgroundColor: C.protein + '25', borderColor: C.protein }]}
+        >
+          <Ionicons name="reorder-two" size={20} color={isActive ? C.protein : C.muted} />
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity activeOpacity={1} onLongPress={drag} delayLongPress={220}>
+        <Card accent={C.protein} style={isActive ? [styles.activeCardGlow, { borderColor: C.protein }] : undefined}>
           <View style={styles.section}>
             <View style={styles.nutritionStats}>
               <View style={styles.nutritionStat}>
@@ -282,11 +380,27 @@ export default function TrackerScreen() {
             )}
           </View>
         </Card>
-        </View>
+      </TouchableOpacity>
+    </View>
+  );
 
-        {/* ── Barcode & Nutrition Scanner (Above Creatine) ── */}
+  const renderScannerSection = (drag: () => void, isActive: boolean) => (
+    <View
+      style={styles.sectionWrap}
+      onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['scanner'] = e.nativeEvent.layout.y; }}
+    >
+      <View style={styles.sectionHeaderRow}>
         <SectionHeader title="Scan & Calculate Macros" icon="barcode-outline" />
-        <Card accent="#4ADE80">
+        <TouchableOpacity
+          onPressIn={drag}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={[styles.dragGripBtn, isActive && { backgroundColor: '#4ADE8025', borderColor: '#4ADE80' }]}
+        >
+          <Ionicons name="reorder-two" size={20} color={isActive ? '#4ADE80' : C.muted} />
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity activeOpacity={1} onLongPress={drag} delayLongPress={220}>
+        <Card accent="#4ADE80" style={isActive ? [styles.activeCardGlow, { borderColor: '#4ADE80' }] : undefined}>
           <View style={styles.section}>
             <View style={styles.scannerHeroRow}>
               <View style={[styles.scannerIconBox, { backgroundColor: isDark ? '#112F18' : '#DCFCE7' }]}>
@@ -309,10 +423,30 @@ export default function TrackerScreen() {
             </TouchableOpacity>
           </View>
         </Card>
+      </TouchableOpacity>
+    </View>
+  );
 
-        <View onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['creatine'] = e.nativeEvent.layout.y; }}>
-          <SectionHeader title="Creatine" icon="flash-outline" />
-        <Card accent={log.creatine_taken ? C.green : C.red}>
+  const renderCreatineSection = (drag: () => void, isActive: boolean) => (
+    <View
+      style={styles.sectionWrap}
+      onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['creatine'] = e.nativeEvent.layout.y; }}
+    >
+      <View style={styles.sectionHeaderRow}>
+        <SectionHeader title="Creatine" icon="flash-outline" />
+        <TouchableOpacity
+          onPressIn={drag}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={[styles.dragGripBtn, isActive && { backgroundColor: C.green + '25', borderColor: C.green }]}
+        >
+          <Ionicons name="reorder-two" size={20} color={isActive ? C.green : C.muted} />
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity activeOpacity={1} onLongPress={drag} delayLongPress={220}>
+        <Card
+          accent={log.creatine_taken ? C.green : C.red}
+          style={isActive ? [styles.activeCardGlow, { borderColor: log.creatine_taken ? C.green : C.red }] : undefined}
+        >
           <View style={styles.section}>
             <TouchableOpacity
               style={[
@@ -345,10 +479,27 @@ export default function TrackerScreen() {
             </TouchableOpacity>
           </View>
         </Card>
-        </View>
+      </TouchableOpacity>
+    </View>
+  );
 
+  const renderHabitsSection = (drag: () => void, isActive: boolean) => (
+    <View
+      style={styles.sectionWrap}
+      onLayout={(e: LayoutChangeEvent) => { sectionOffsets.current['habits'] = e.nativeEvent.layout.y; }}
+    >
+      <View style={styles.sectionHeaderRow}>
         <SectionHeader title="Daily Habits" icon="checkmark-circle-outline" />
-        <Card accent={C.accent}>
+        <TouchableOpacity
+          onPressIn={drag}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={[styles.dragGripBtn, isActive && { backgroundColor: C.accent + '25', borderColor: C.accent }]}
+        >
+          <Ionicons name="reorder-two" size={20} color={isActive ? C.accent : C.muted} />
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity activeOpacity={1} onLongPress={drag} delayLongPress={220}>
+        <Card accent={C.accent} style={isActive ? [styles.activeCardGlow, { borderColor: C.accent }] : undefined}>
           <View style={styles.section}>
             {(([
               ['workout_completed',    'barbell-outline',     'Workout Completed',    'Auto-tracked when a session is logged in Workouts.'],
@@ -400,7 +551,81 @@ export default function TrackerScreen() {
             </View>
           </View>
         </Card>
-      </ScrollView>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderItem = ({ item, drag, isActive }: RenderItemParams<TrackerSectionKey>) => {
+    return (
+      <ScaleDecorator activeScale={1.03}>
+        <View style={[styles.dragItemContainer, isActive && styles.activeDragItem]}>
+          {item === 'water' && renderWaterSection(drag, isActive)}
+          {item === 'nutrition' && renderNutritionSection(drag, isActive)}
+          {item === 'scanner' && renderScannerSection(drag, isActive)}
+          {item === 'creatine' && renderCreatineSection(drag, isActive)}
+          {item === 'habits' && renderHabitsSection(drag, isActive)}
+        </View>
+      </ScaleDecorator>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      {/* ── Header ── */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerTitle}>Daily Tracker</Text>
+          <Text style={styles.headerDate}>
+            {new Date().toLocaleDateString('en-US', {
+              weekday: 'short',
+              month: 'short',
+              day: 'numeric',
+            })}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.arrangeBtn, isArranging && { backgroundColor: C.accent, borderColor: C.accent }]}
+          onPress={() => setIsArranging(prev => !prev)}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name={isArranging ? "checkmark" : "apps-outline"}
+            size={16}
+            color={isArranging ? '#fff' : C.accent}
+          />
+          <Text style={[styles.arrangeBtnTxt, isArranging && { color: '#fff' }]}>
+            {isArranging ? 'Done' : 'Widgets'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Widget Arrangement Helper Banner ── */}
+      {isArranging && (
+        <View style={styles.arrangeBanner}>
+          <Ionicons name="information-circle-outline" size={18} color={C.accent} style={{ marginRight: 8 }} />
+          <Text style={styles.arrangeBannerTxt}>Hold ⠿ or any section to drag & drop anywhere</Text>
+          <TouchableOpacity onPress={handleResetLayout} style={styles.resetBtn} activeOpacity={0.75}>
+            <Text style={styles.resetBtnTxt}>Reset</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Reorderable Draggable FlatList ── */}
+      <View style={{ flex: 1 }} {...panResponder.panHandlers}>
+        <DraggableFlatList
+          ref={flatListRef}
+          data={sections}
+          onDragEnd={handleDragEnd}
+          keyExtractor={(item) => item}
+          renderItem={renderItem}
+          activationDistance={20}
+          animationConfig={{ damping: 24, stiffness: 240, mass: 0.55 }}
+          refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
 
       <PickerModal
         visible={waterModal}
@@ -441,8 +666,79 @@ function makeStyles(C: any, isDark?: boolean) { return StyleSheet.create({
     borderBottomColor: C.border,
   },
   headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
-  headerDate: { fontSize: 12, color: C.muted },
-  scroll: { padding: 16, paddingBottom: 40 },
+  headerDate: { fontSize: 12, color: C.muted, marginTop: 2 },
+  arrangeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: C.accentDim,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.accent + '44',
+  },
+  arrangeBtnTxt: { fontSize: 12, fontWeight: '700', color: C.accent },
+  arrangeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: C.accent + '55',
+  },
+  arrangeBannerTxt: { flex: 1, fontSize: 11, color: C.text, fontWeight: '600' },
+  resetBtn: {
+    backgroundColor: C.accentDim,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.accent + '33',
+  },
+  resetBtnTxt: { fontSize: 11, fontWeight: '700', color: C.accent },
+  scroll: { padding: 16, paddingBottom: 50 },
+
+  // Draggable container
+  dragItemContainer: {
+    marginBottom: 16,
+  },
+  activeDragItem: {
+    zIndex: 9999,
+  },
+  activeCardGlow: {
+    borderWidth: 1.5,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+
+  // Section Header row with drag handle
+  sectionWrap: {
+    width: '100%',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  dragGripBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+
   section: { padding: 16 },
   macroTopRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   bigVal: { fontSize: 28, fontWeight: '800', marginBottom: 4 },
@@ -454,9 +750,11 @@ function makeStyles(C: any, isDark?: boolean) { return StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 10,
     alignItems: 'center',
-    shadowColor: '#BFC8D6',
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: isDark ? '#000000' : '#BFC8D6',
     shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.9,
+    shadowOpacity: isDark ? 0.3 : 0.9,
     shadowRadius: 8,
     elevation: 4,
   },
@@ -470,32 +768,6 @@ function makeStyles(C: any, isDark?: boolean) { return StyleSheet.create({
   nutritionStat: { alignItems: 'center', gap: 6 },
   nutritionVal: { fontSize: 18, fontWeight: '800' },
   nutritionLabel: { fontSize: 11, color: C.muted },
-  customForm: {
-    backgroundColor: C.card,
-    borderRadius: 16,
-    padding: 14,
-    marginTop: 12,
-    shadowColor: '#BFC8D6',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  customTitle: { fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 10 },
-  input: {
-    backgroundColor: C.bg,
-    borderRadius: 12,
-    borderWidth: 0,
-    color: C.text,
-    padding: 12,
-    fontSize: 14,
-    marginBottom: 10,
-    shadowColor: '#BFC8D6',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.9,
-    shadowRadius: 8,
-    elevation: 4,
-  },
   foodList: { marginTop: 12, borderTopWidth: 1, borderTopColor: C.border },
   foodRow: {
     flexDirection: 'row',
@@ -510,12 +782,13 @@ function makeStyles(C: any, isDark?: boolean) { return StyleSheet.create({
   creatineBtn: {
     alignItems: 'center',
     borderRadius: 20,
-    borderWidth: 0,
+    borderWidth: 1,
+    borderColor: C.border,
     paddingVertical: 24,
     backgroundColor: C.card,
-    shadowColor: '#BFC8D6',
+    shadowColor: isDark ? '#000000' : '#BFC8D6',
     shadowOffset: { width: 6, height: 6 },
-    shadowOpacity: 0.9,
+    shadowOpacity: isDark ? 0.3 : 0.9,
     shadowRadius: 12,
     elevation: 8,
   },

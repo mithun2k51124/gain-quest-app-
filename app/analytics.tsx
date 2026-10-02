@@ -397,7 +397,7 @@ export default function AnalyticsScreen() {
                     width: i === activeModalIdx ? 18 : 6,
                     height: 6,
                     borderRadius: 3,
-                    backgroundColor: i === activeModalIdx ? C.accent : '#252D3D',
+                    backgroundColor: i === activeModalIdx ? C.accent : C.border,
                   }}
                 />
               ))}
@@ -743,7 +743,7 @@ function NutritionTab({
           {
             backgroundColor: hasNutrition
               ? (protPct >= 1 && waterPct >= 1 ? C.green + '22' : C.protein + '22')
-              : (isDark ? '#1C2333' : '#E8ECF0'),
+              : (isDark ? C.card : '#E8ECF0'),
             borderColor: hasNutrition
               ? (protPct >= 1 && waterPct >= 1 ? C.green : C.protein)
               : C.border,
@@ -823,7 +823,7 @@ function NutritionTab({
                 <View style={[
                   styles.statusBadge,
                   {
-                    backgroundColor: creatineTaken ? C.green + '22' : (isDark ? '#1C2333' : '#E8ECF0'),
+                    backgroundColor: creatineTaken ? C.green + '22' : (isDark ? C.card : '#E8ECF0'),
                     borderColor: creatineTaken ? C.green : C.border,
                     borderWidth: 1,
                   }
@@ -1142,7 +1142,7 @@ function WorkoutsTab({
         <View style={[
           styles.statusBadge,
           {
-            backgroundColor: isCompleted ? C.green + '22' : (isDark ? '#1C2333' : '#E8ECF0'),
+            backgroundColor: isCompleted ? C.green + '22' : (isDark ? C.card : '#E8ECF0'),
             borderColor: isCompleted ? C.green : C.border,
             borderWidth: 1,
           }
@@ -1631,8 +1631,8 @@ function makeStyles(C: any, isDark: boolean) {
 
     // Samsung Health Style Navigation & Calendar
     navRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12, gap: 10 },
-    navArrowBtn:   { width: 34, height: 34, borderRadius: 17, backgroundColor: isDark ? '#1C2333' : '#E8ECF0', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
-    navPill:       { paddingVertical: 8, paddingHorizontal: 22, borderRadius: 20, backgroundColor: isDark ? '#1C2333' : '#E8ECF0', borderWidth: 1, borderColor: C.border },
+    navArrowBtn:   { width: 34, height: 34, borderRadius: 17, backgroundColor: isDark ? C.card : '#E8ECF0', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
+    navPill:       { paddingVertical: 8, paddingHorizontal: 22, borderRadius: 20, backgroundColor: isDark ? C.card : '#E8ECF0', borderWidth: 1, borderColor: C.border },
     navPillToday:  { backgroundColor: C.accent, borderColor: C.accent },
     navPillTxt:    { fontSize: 14, fontWeight: '700', color: C.text },
     navPillTxtToday: { color: '#fff' },
@@ -1648,7 +1648,7 @@ function makeStyles(C: any, isDark: boolean) {
     weekDayNum:    { fontSize: 13, fontWeight: '700', color: C.text },
 
     // Full Calendar Grid
-    monthStatsRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#151A26' : '#F0F4F8', padding: 8, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: C.border },
+    monthStatsRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? C.bg : '#F0F4F8', padding: 8, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: C.border },
     calCell:       { width: '14.28%', height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
     calCellEmpty:  { width: '14.28%', height: 44 },
     calCellSel:    { backgroundColor: C.accent },

@@ -188,7 +188,7 @@ export default function BodyAnatomy({
 function makeStyles(C: any, isDark: boolean) {
   return StyleSheet.create({
     container:   { alignItems: 'center', paddingVertical: 10 },
-    toggleRow:   { flexDirection: 'row', backgroundColor: isDark ? '#1C2333' : '#E8EBF3', borderRadius: 14, padding: 4, marginBottom: 14, gap: 4, borderWidth: 1, borderColor: C.border },
+    toggleRow:   { flexDirection: 'row', backgroundColor: isDark ? C.card : '#E8EBF3', borderRadius: 14, padding: 4, marginBottom: 14, gap: 4, borderWidth: 1, borderColor: C.border },
     btn:         { paddingVertical: 7, paddingHorizontal: 28, borderRadius: 10 },
     btnA:        { backgroundColor: C.accent, shadowColor: C.accent, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 3 },
     btnTxt:      { fontSize: 13, fontWeight: '700', color: C.muted },
