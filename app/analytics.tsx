@@ -285,6 +285,19 @@ export default function AnalyticsScreen() {
                 })}
               </View>
             </Card>
+
+            {/* Recent Workouts Table */}
+            <RecentWorkoutsTable
+              C={C}
+              isDark={isDark}
+              workoutDates={workoutDates}
+              selectedDay={selectedDay}
+              setSelectedDay={(d: string) => {
+                setSelectedDay(d);
+                setTab('Workouts');
+              }}
+              allPRs={allPRs}
+            />
           </>
         )}
 
@@ -1057,6 +1070,238 @@ function NutritionTab({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RECENT WORKOUTS TABLE (Interactive Data Table with Muscle Badges & Volume)
+// ─────────────────────────────────────────────────────────────────────────────
+function RecentWorkoutsTable({
+  C,
+  isDark,
+  workoutDates,
+  selectedDay,
+  setSelectedDay,
+  allPRs,
+  onGoToWorkouts,
+}: {
+  C: any;
+  isDark: boolean;
+  workoutDates: string[];
+  selectedDay: string;
+  setSelectedDay: (d: string) => void;
+  allPRs: any[];
+  onGoToWorkouts?: () => void;
+}) {
+  const today = todayStr();
+  const recentDates = workoutDates.slice().reverse();
+
+  // Precompute data for table
+  const workoutRows = recentDates.map((d: string) => {
+    const isCur = d === selectedDay;
+    const isToday = d === today;
+    const sessions = getWorkoutSessionsForDate(d);
+    const exercises = getExerciseLogsForDate(d);
+    const sets = exercises.reduce((sum: number, e: ExerciseLog) => sum + (e.sets || 0), 0);
+    const volume = exercises.reduce((sum: number, e: ExerciseLog) => sum + ((e.weight || 0) * (e.reps || 0) * (e.sets || 1)), 0);
+    const mgs = Array.from(new Set([
+      ...sessions.flatMap((s: WorkoutSession) => (s.muscle_groups || '').split(',').map((m: string) => m.trim()).filter(Boolean)),
+      ...exercises.map((e: ExerciseLog) => e.muscle_group).filter(Boolean)
+    ]));
+    const hasPR = allPRs.some((p: any) => p.record_date === d);
+
+    return {
+      date: d,
+      isCur,
+      isToday,
+      mgs,
+      sets,
+      volume,
+      exerciseCount: exercises.length,
+      sessionCount: sessions.length,
+      hasPR,
+    };
+  });
+
+  const totalVol = workoutRows.reduce((sum, r) => sum + r.volume, 0);
+  const totalSets = workoutRows.reduce((sum, r) => sum + r.sets, 0);
+
+  return (
+    <View style={{ marginTop: 14 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2 }}>
+        <SectionHeader title="Recent Workouts" icon="barbell-outline" />
+        {workoutRows.length > 0 && (
+          <View style={{ backgroundColor: C.purple + '22', paddingHorizontal: 9, paddingVertical: 3, borderRadius: 12, borderWidth: 1, borderColor: C.purple + '44' }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: C.purple }}>
+              {workoutRows.length} Logged
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <Card accent={C.purple}>
+        {workoutRows.length === 0 ? (
+          <View style={{ padding: 24, alignItems: 'center' }}>
+            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: C.purple + '22', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
+              <Ionicons name="barbell-outline" size={26} color={C.purple} />
+            </View>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: C.text }}>No Recent Workouts Yet</Text>
+            <Text style={{ fontSize: 12, color: C.muted, textAlign: 'center', marginTop: 4, paddingHorizontal: 16 }}>
+              Log workouts to build your recent workout volume table and see training history.
+            </Text>
+          </View>
+        ) : (
+          <View style={{ padding: 10 }}>
+            {/* Table Header */}
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 8,
+              paddingHorizontal: 8,
+              backgroundColor: isDark ? C.bg : '#F0F4F8',
+              borderRadius: 8,
+              marginBottom: 4,
+            }}>
+              <Text style={{ width: 72, fontSize: 10, fontWeight: '800', color: C.muted, textTransform: 'uppercase' }}>Date</Text>
+              <Text style={{ flex: 1, fontSize: 10, fontWeight: '800', color: C.muted, textTransform: 'uppercase' }}>Muscles / Split</Text>
+              <Text style={{ width: 62, fontSize: 10, fontWeight: '800', color: C.muted, textAlign: 'center', textTransform: 'uppercase' }}>Sets</Text>
+              <Text style={{ width: 72, fontSize: 10, fontWeight: '800', color: C.muted, textAlign: 'right', textTransform: 'uppercase' }}>Volume</Text>
+            </View>
+
+            {/* Table Rows */}
+            {workoutRows.map((row) => {
+              return (
+                <TouchableOpacity
+                  key={row.date}
+                  onPress={() => setSelectedDay(row.date)}
+                  activeOpacity={0.75}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingVertical: 10,
+                    paddingHorizontal: 8,
+                    borderBottomWidth: 1,
+                    borderBottomColor: C.border + '66',
+                    backgroundColor: row.isCur ? (isDark ? C.purple + '25' : '#EDE9FE') : 'transparent',
+                    borderRadius: row.isCur ? 8 : 0,
+                    borderLeftWidth: row.isCur ? 3 : 0,
+                    borderLeftColor: C.purple,
+                  }}
+                >
+                  {/* Date Column */}
+                  <View style={{ width: 72, paddingRight: 4 }}>
+                    <Text style={{
+                      fontSize: 12,
+                      fontWeight: row.isCur || row.isToday ? '800' : '600',
+                      color: row.isCur ? C.purple : (row.isToday ? C.accent : C.text),
+                    }} numberOfLines={1}>
+                      {row.isToday ? 'Today' : row.date.slice(5)}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: C.muted }}>
+                      {new Date(row.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
+                    </Text>
+                  </View>
+
+                  {/* Muscles / Split Column */}
+                  <View style={{ flex: 1, paddingRight: 4 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                      {row.mgs.length > 0 ? (
+                        row.mgs.slice(0, 2).map((m: string) => {
+                          const col = C.mg[m] || C.purple;
+                          return (
+                            <View key={m} style={{
+                              backgroundColor: col + '18',
+                              borderColor: col + '44',
+                              borderWidth: 1,
+                              borderRadius: 6,
+                              paddingHorizontal: 5,
+                              paddingVertical: 1.5,
+                            }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: col }}>
+                                {m}
+                              </Text>
+                            </View>
+                          );
+                        })
+                      ) : (
+                        <Text style={{ fontSize: 11, color: C.textSub, fontWeight: '600' }}>
+                          Workout
+                        </Text>
+                      )}
+                      {row.hasPR && (
+                        <View style={{
+                          backgroundColor: '#FF572220',
+                          borderColor: '#FF572255',
+                          borderWidth: 1,
+                          borderRadius: 6,
+                          paddingHorizontal: 4,
+                          paddingVertical: 1.5,
+                        }}>
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#FF5722' }}>PR 🔥</Text>
+                        </View>
+                      )}
+                    </View>
+                    {row.mgs.length > 2 && (
+                      <Text style={{ fontSize: 9, color: C.muted, marginTop: 2 }}>
+                        +{row.mgs.length - 2} more
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Sets Column */}
+                  <View style={{ width: 62, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: C.text }}>
+                      {row.sets > 0 ? row.sets : '—'}
+                    </Text>
+                    <Text style={{ fontSize: 9, color: C.muted }}>
+                      {row.exerciseCount > 0 ? `${row.exerciseCount} exs` : 'done'}
+                    </Text>
+                  </View>
+
+                  {/* Volume Column */}
+                  <View style={{ width: 72, alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: row.volume > 0 ? C.calories : C.muted }}>
+                      {row.volume > 0 ? `${Math.round(row.volume)}` : '—'}
+                    </Text>
+                    <Text style={{ fontSize: 9, color: C.muted }}>
+                      {row.volume > 0 ? 'kg' : ''}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* Table Footer Totals */}
+            {workoutRows.length > 0 && (
+              <View style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingTop: 10,
+                paddingHorizontal: 8,
+                marginTop: 4,
+                borderTopWidth: 1,
+                borderTopColor: C.border,
+              }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: C.muted }}>
+                  Total {workoutRows.length} sessions
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 14 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: C.water }}>
+                    {totalSets} sets
+                  </Text>
+                  {totalVol > 0 && (
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: C.calories }}>
+                      {Math.round(totalVol).toLocaleString()} kg
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+      </Card>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // WORKOUTS TAB (Calendar + Daily Results + Exercises + Anatomy + History + Trends)
 // ─────────────────────────────────────────────────────────────────────────────
 function WorkoutsTab({
@@ -1334,46 +1579,15 @@ function WorkoutsTab({
         </Card>
       )}
 
-      {/* ── All Recorded Workout Days List ──────────────────────────────── */}
-      {workoutDates.length > 0 && (
-        <View style={{ marginTop: 14 }}>
-          <SectionHeader title="All Workout Days" />
-          <Card accent={C.purple}>
-            <View style={{ padding: 12 }}>
-              {workoutDates.slice().reverse().map((d: string) => {
-                const isCur = d === selectedDay;
-                const dSessions = getWorkoutSessionsForDate(d);
-                const dExs = getExerciseLogsForDate(d);
-                const mgs = Array.from(new Set([
-                  ...dSessions.flatMap((s: WorkoutSession) => (s.muscle_groups || '').split(',').map((m: string) => m.trim()).filter(Boolean)),
-                  ...dExs.map((e: ExerciseLog) => e.muscle_group).filter(Boolean)
-                ]));
-
-                return (
-                  <TouchableOpacity
-                    key={d}
-                    onPress={() => setSelectedDay(d)}
-                    style={[styles.historyRow, isCur && { backgroundColor: C.accentDim + '33', borderRadius: 10 }]}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.historyDot, { backgroundColor: isCur ? C.accent : C.purple }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.historyDateTxt, isCur && { color: C.accent, fontWeight: '800' }]}>
-                        {d === today ? `Today (${d})` : d}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: C.muted }}>
-                        {mgs.length > 0 ? mgs.slice(0, 3).join(', ') : 'Workout Completed'}
-                        {dExs.length > 0 ? ` · ${dExs.length} exercise${dExs.length !== 1 ? 's' : ''}` : ''}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={C.muted} />
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </Card>
-        </View>
-      )}
+      {/* ── Recent Workouts Table ─────────────────────────────────────── */}
+      <RecentWorkoutsTable
+        C={C}
+        isDark={isDark}
+        workoutDates={workoutDates}
+        selectedDay={selectedDay}
+        setSelectedDay={setSelectedDay}
+        allPRs={allPRs}
+      />
 
       {/* ── 30-Day Completion Rate Chart ─────────────────────────────────── */}
       <View style={{ marginTop: 16 }}>

@@ -11,4 +11,13 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
-# Add any project specific keep options here:
+# Expo & React Native standard keep rules
+-keep class com.facebook.react.** { *; }
+-keep class com.facebook.jni.** { *; }
+-keep class expo.modules.** { *; }
+-keep class * implements expo.modules.core.interfaces.Package { *; }
+-keep class * implements expo.modules.kotlin.modules.Module { *; }
+-keepattributes *Annotation*
+-keepattributes JavascriptInterface
+-dontwarn com.facebook.react.**
+-dontwarn expo.modules.**
