@@ -29,6 +29,7 @@ import {
 } from '../db/database';
 import { SectionHeader } from '../components/ui';
 import { useTheme } from '../contexts/ThemeContext';
+import { logError } from '../utils/logError';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -403,7 +404,7 @@ export default function OverallScreen() {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) { logError('overallMetrics', e); }
     return DEFAULT_METRICS;
   });
 
@@ -436,7 +437,7 @@ export default function OverallScreen() {
     setSelectedMetrics(updated);
     try {
       setSetting('overall_ring_metrics_v2', JSON.stringify(updated));
-    } catch (_) {}
+    } catch (e) { logError('overallMetrics', e); }
     setPickerSlot(null);
   };
 
@@ -444,14 +445,14 @@ export default function OverallScreen() {
     setSelectedMetrics(presetKeys);
     try {
       setSetting('overall_ring_metrics_v2', JSON.stringify(presetKeys));
-    } catch (_) {}
+    } catch (e) { logError('overallMetrics', e); }
   };
 
   const handleResetDefaults = () => {
     setSelectedMetrics(DEFAULT_METRICS);
     try {
       setSetting('overall_ring_metrics_v2', JSON.stringify(DEFAULT_METRICS));
-    } catch (_) {}
+    } catch (e) { logError('overallMetrics', e); }
   };
 
   const styles = makeStyles(C, isDark);

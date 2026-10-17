@@ -56,6 +56,12 @@
           "microphonePermission": "GainQuest needs your microphone to record voice workout commands.",
           "speechRecognitionPermission": "GainQuest uses speech recognition to log workouts by voice."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#3B82F6"
+        }
       ]
     ],
     "scheme": "gainquest",

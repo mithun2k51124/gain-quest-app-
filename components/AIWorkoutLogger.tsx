@@ -17,10 +17,11 @@ import {
   ParsedFoodItem,
 } from '../utils/geminiParser';
 import {
-  createWorkoutSession, logExercise,
+  logWorkoutSession,
   updateDailyLog, updateStreak, todayStr, getSetting,
   addFood,
 } from '../db/database';
+import { logError } from '../utils/logError';
 
 const { height: SH, width: SW } = Dimensions.get('window');
 
@@ -292,7 +293,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
       try {
         const { granted } = await SpeechModule.requestPermissionsAsync();
         setHasPermission(granted);
-      } catch {}
+      } catch (e) { logError('micPermission', e); }
     }
   };
 
@@ -370,7 +371,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
     if (!VOICE_AVAILABLE) return;
     try {
       SpeechModule.stop();
-    } catch {}
+    } catch (e) { logError('stopListening', e); }
   };
 
   const handleMicPress = () => {
@@ -435,10 +436,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   const commitWorkout = () => {
     const today = todayStr();
     const muscleGroups = [...new Set(workoutExercises.map(p => p.muscleGroup))].join(',');
-    const sessionId = createWorkoutSession(today, muscleGroups, 'Logged via AI');
-    for (const ex of workoutExercises) {
-      logExercise(sessionId, today, ex.exercise, ex.muscleGroup, ex.sets, ex.reps, ex.weight, ex.unit);
-    }
+    logWorkoutSession(today, muscleGroups, 'Logged via AI', workoutExercises);
     updateDailyLog(today, { workout_completed: 1 });
     updateStreak();
     setSuccessInfo({

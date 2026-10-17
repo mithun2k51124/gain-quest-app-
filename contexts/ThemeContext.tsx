@@ -4,6 +4,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { LIGHT_THEME, DARK_THEME, Theme } from '../constants/theme';
 import { getSetting, setSetting } from '../db/database';
+import { logError } from '../utils/logError';
 
 interface ThemeContextValue {
   C: Theme;
@@ -25,13 +26,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     try {
       const saved = getSetting('dark_mode', 'false');
       setIsDark(saved === 'true');
-    } catch (_) {}
+    } catch (e) { logError('loadTheme', e); }
   }, []);
 
   const toggleDark = () => {
     setIsDark(prev => {
       const next = !prev;
-      try { setSetting('dark_mode', next ? 'true' : 'false'); } catch (_) {}
+      try { setSetting('dark_mode', next ? 'true' : 'false'); } catch (e) { logError('saveTheme', e); }
       return next;
     });
   };

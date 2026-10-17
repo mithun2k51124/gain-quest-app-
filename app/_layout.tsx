@@ -12,6 +12,7 @@ import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import { AlertProvider } from '../contexts/AlertContext';
 import OnboardingModal from '../components/OnboardingModal';
 import AIWorkoutLogger from '../components/AIWorkoutLogger';
+import { initReminders, onReminderTap } from '../utils/reminders';
 
 const TAB_ROUTES = [
   '/',
@@ -188,6 +189,7 @@ function RootLayoutInner() {
   useEffect(() => {
     try {
       initializeDatabase();
+      initReminders();
       const done = getOnboardingComplete();
       setShowOnboarding(!done);
       setReady(true);
@@ -195,6 +197,24 @@ function RootLayoutInner() {
       setError(e.message);
     }
   }, []);
+
+  // Tapping a reminder notification opens the matching part of the app
+  useEffect(() => {
+    if (!ready) return;
+    return onReminderTap(kind => {
+      // Small delay so the navigator is mounted when the app was launched by the tap
+      setTimeout(() => {
+        const t = String(Date.now());
+        switch (kind) {
+          case 'water':    router.navigate({ pathname: '/tracker', params: { openSection: 'water', t } } as any); break;
+          case 'protein':  router.navigate({ pathname: '/tracker', params: { openSection: 'nutrition', t } } as any); break;
+          case 'creatine': router.navigate({ pathname: '/tracker', params: { openSection: 'creatine', t } } as any); break;
+          case 'workout':  router.navigate({ pathname: '/workouts', params: { openTab: 'Log' } } as any); break;
+          default: break; // custom: just open the app
+        }
+      }, 300);
+    });
+  }, [ready, router]);
 
   if (error) {
     return (

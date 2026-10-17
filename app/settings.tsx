@@ -7,9 +7,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';;
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   getGoals, updateGoals, getSetting, setSetting, Goals, resetDatabase,
+  getAllProgressPhotoUris,
 } from '../db/database';
+import { logError } from '../utils/logError';
+import { rescheduleReminders } from '../utils/reminders';
 import { Card, SectionHeader, Btn, SelectBtn, PickerModal, Toggle } from '../components/ui';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -82,14 +86,19 @@ export default function SettingsScreen() {
   const handleResetData = () => {
     showAlert(
       'Reset All Data?',
-      'This will permanently delete all daily logs, workout history, PRs, weight entries, and reset goals back to clean defaults. This cannot be undone.',
+      'This will permanently delete all daily logs, workout history, PRs, weight entries, progress photos, and reset goals back to clean defaults. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reset Everything',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
+            const photoUris = getAllProgressPhotoUris();
             resetDatabase();
+            rescheduleReminders(); // reminders are off after a reset → clears scheduled notifications
+            await Promise.all(photoUris.map(uri =>
+              FileSystem.deleteAsync(uri, { idempotent: true }).catch(e => logError('resetPhotos', e))
+            ));
             load();
             showAlert('App Reset ✓', 'All entries and logs have been reset.');
           },

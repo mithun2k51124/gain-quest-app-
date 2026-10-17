@@ -12,7 +12,7 @@ import { VictoryChart, VictoryLine, VictoryAxis,
 import {
   getWeeklyStats, getLastNDaysLogs,
   getGoals, getMuscleTracker,
-  todayStr, DailyLog, Goals,
+  todayStr, toDateStr, DailyLog, Goals,
   addProgressPhoto, getProgressPhotos, getProgressPhotoDates,
   deleteProgressPhoto, ProgressPhoto,
   getWorkoutSessionsForDate, getExerciseLogsForDate, getWorkoutDates,
@@ -21,8 +21,10 @@ import {
 } from '../db/database';
 import { Card, SectionHeader, ProgressBar, MuscleTag } from '../components/ui';
 import BodyAnatomy from '../components/BodyAnatomy';
+import { NutritionTrend } from '../components/NutritionTrend';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
+import { logError } from '../utils/logError';
 import { MUSCLE_GROUPS } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -186,7 +188,7 @@ export default function AnalyticsScreen() {
     Alert.alert('Delete Photo', 'Remove this progress photo?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        try { await FileSystem.deleteAsync(photo.uri, { idempotent: true }); } catch {}
+        try { await FileSystem.deleteAsync(photo.uri, { idempotent: true }); } catch (e) { logError('deletePhoto', e); }
         deleteProgressPhoto(photo.id, photo.uri);
         const updated = getProgressPhotos(modalDay);
         setModalPhotos(updated);
@@ -468,7 +470,7 @@ function DayCalendarNav({
       for (let i = -dow; i < 7 - dow; i++) {
         const nd = new Date(d);
         nd.setDate(d.getDate() + i);
-        days.push(nd.toISOString().slice(0, 10));
+        days.push(toDateStr(nd));
       }
       return days;
     } catch {
@@ -490,9 +492,9 @@ function DayCalendarNav({
     try {
       const d = new Date(selectedDay + 'T00:00:00');
       d.setDate(d.getDate() + delta);
-      const nextStr = d.toISOString().slice(0, 10);
+      const nextStr = toDateStr(d);
       onSelectDay(nextStr);
-    } catch {}
+    } catch (e) { logError('shiftDay', e); }
   };
 
   const formattedSelected = formatDateLabel(selectedDay);
@@ -954,116 +956,9 @@ function NutritionTab({
         </View>
       )}
 
-      {/* ── 30-Day Macro Trends ─────────────────────────────────────────── */}
+      {/* ── Trends: water / protein / calories ─────────────────────────────── */}
       <View style={{ marginTop: 16 }}>
-        <SectionHeader title="30-Day Protein Intake" />
-        {logs.length >= 3 ? (
-          <Card accent={C.protein}>
-            <VictoryChart
-              width={SW - 40}
-              height={200}
-              theme={VictoryTheme.material}
-              padding={{ top: 20, bottom: 50, left: 50, right: 20 }}
-            >
-              <VictoryAxis
-                tickCount={6}
-                tickFormat={(_, i: number) => {
-                  const d = logs[Math.floor(i * (logs.length / 6))];
-                  return d ? d.log_date.slice(5) : '';
-                }}
-                style={{
-                  axis: { stroke: C.border },
-                  tickLabels: { fill: C.muted, fontSize: 9, angle: -30 },
-                  grid: { stroke: 'transparent' },
-                }}
-              />
-              <VictoryAxis dependentAxis
-                style={{
-                  axis: { stroke: C.border },
-                  tickLabels: { fill: C.muted, fontSize: 9 },
-                  grid: { stroke: C.border, strokeDasharray: '4,4' },
-                }}
-              />
-              <VictoryBar
-                data={logs.map((l: DailyLog, i: number) => ({
-                  x: i + 1,
-                  y: l.protein_intake || 0,
-                  fill: (l.protein_intake || 0) >= (goals?.protein_goal || 120) ? C.green : C.protein,
-                }))}
-                style={{ data: { fill: ({ datum }: any) => datum.fill } }}
-                barWidth={Math.max(4, (SW - 100) / logs.length - 2)}
-              />
-              {goals && (
-                <VictoryLine
-                  data={[{ x: 1, y: goals.protein_goal }, { x: logs.length, y: goals.protein_goal }]}
-                  style={{ data: { stroke: C.red, strokeDasharray: '4,3', strokeWidth: 1.5 } }}
-                />
-              )}
-            </VictoryChart>
-
-            {/* Averages */}
-            {logs.filter((l: DailyLog) => l.protein_intake > 0).length > 0 && goals && (
-              <View style={{ padding: 16 }}>
-                {[
-                  { label: 'Avg Protein', val: `${Math.round(logs.reduce((s: number, l: DailyLog) => s + (l.protein_intake||0), 0) / logs.length)} g`, color: C.protein },
-                  { label: 'Avg Calories', val: `${Math.round(logs.reduce((s: number, l: DailyLog) => s + (l.calorie_intake||0), 0) / logs.length)} kcal`, color: C.calories },
-                  { label: 'Avg Water', val: `${(logs.reduce((s: number, l: DailyLog) => s + (l.water_intake||0), 0) / logs.length).toFixed(2)} L`, color: C.water },
-                ].map(({ label, val, color }) => (
-                  <View key={label} style={styles.avgRow}>
-                    <Text style={styles.avgLabel}>{label}</Text>
-                    <Text style={[styles.avgVal, { color }]}>{val}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </Card>
-        ) : (
-          <Card accent={C.protein}>
-            <View style={{ padding: 24, alignItems: 'center' }}>
-              <Ionicons name="restaurant-outline" size={32} color={C.muted} />
-              <Text style={{ color: C.muted, marginTop: 8, textAlign: 'center', fontSize: 13 }}>
-                Log food in the Tracker to see 30-day nutrition charts
-              </Text>
-            </View>
-          </Card>
-        )}
-
-        <SectionHeader title="30-Day Calorie Intake" />
-        {logs.length >= 3 ? (
-          <Card accent={C.calories}>
-            <VictoryChart
-              width={SW - 40}
-              height={180}
-              theme={VictoryTheme.material}
-              padding={{ top: 20, bottom: 50, left: 60, right: 20 }}
-            >
-              <VictoryAxis
-                tickCount={6}
-                tickFormat={(_, i: number) => {
-                  const d = logs[Math.floor(i * (logs.length / 6))];
-                  return d ? d.log_date.slice(5) : '';
-                }}
-                style={{
-                  axis: { stroke: C.border },
-                  tickLabels: { fill: C.muted, fontSize: 9, angle: -30 },
-                  grid: { stroke: 'transparent' },
-                }}
-              />
-              <VictoryAxis dependentAxis
-                style={{
-                  axis: { stroke: C.border },
-                  tickLabels: { fill: C.muted, fontSize: 9 },
-                  grid: { stroke: C.border, strokeDasharray: '4,4' },
-                }}
-              />
-              <VictoryArea
-                data={logs.map((l: DailyLog, i: number) => ({ x: i + 1, y: l.calorie_intake || 0 }))}
-                style={{ data: { fill: C.calories + '22', stroke: C.calories, strokeWidth: 2 } }}
-                interpolation="monotoneX"
-              />
-            </VictoryChart>
-          </Card>
-        ) : null}
+        <NutritionTrend logs={logs} goals={goals} />
       </View>
     </>
   );
@@ -1589,78 +1484,6 @@ function WorkoutsTab({
         allPRs={allPRs}
       />
 
-      {/* ── 30-Day Completion Rate Chart ─────────────────────────────────── */}
-      <View style={{ marginTop: 16 }}>
-        <SectionHeader title="Workout Completion (30 days)" />
-        {logs.length >= 3 ? (
-          <Card accent={C.purple}>
-            <VictoryChart
-              width={SW - 40}
-              height={180}
-              theme={VictoryTheme.material}
-              padding={{ top: 20, bottom: 50, left: 40, right: 20 }}
-            >
-              <VictoryAxis
-                tickCount={6}
-                tickFormat={(_, i: number) => {
-                  const d = logs[Math.floor(i * (logs.length / 6))];
-                  return d ? d.log_date.slice(5) : '';
-                }}
-                style={{
-                  axis: { stroke: C.border },
-                  tickLabels: { fill: C.muted, fontSize: 9, angle: -30 },
-                  grid: { stroke: 'transparent' },
-                }}
-              />
-              <VictoryAxis dependentAxis
-                tickValues={[0, 1]}
-                tickFormat={v => v === 1 ? '✓' : ''}
-                style={{
-                  axis: { stroke: C.border },
-                  tickLabels: { fill: C.muted, fontSize: 10 },
-                  grid: { stroke: C.border, strokeDasharray: '4,4' },
-                }}
-              />
-              <VictoryBar
-                data={logs.map((l: DailyLog, i: number) => ({
-                  x: i + 1,
-                  y: l.workout_completed ? 1 : 0,
-                }))}
-                style={{ data: { fill: C.purple } }}
-                barWidth={Math.max(4, (SW - 80) / logs.length - 2)}
-                cornerRadius={{ top: 3 }}
-              />
-            </VictoryChart>
-
-            {/* Workout stats summary */}
-            <View style={{ padding: 16 }}>
-              {[
-                { label: 'Workouts completed', val: String(logs.filter((l: DailyLog) => l.workout_completed).length), color: C.purple },
-                { label: 'Days tracked', val: String(logs.length), color: C.muted },
-                {
-                  label: 'Completion rate',
-                  val: logs.length ? `${Math.round(logs.filter((l: DailyLog) => l.workout_completed).length / logs.length * 100)}%` : '0%',
-                  color: C.green,
-                },
-              ].map(({ label, val, color }) => (
-                <View key={label} style={styles.avgRow}>
-                  <Text style={styles.avgLabel}>{label}</Text>
-                  <Text style={[styles.avgVal, { color }]}>{val}</Text>
-                </View>
-              ))}
-            </View>
-          </Card>
-        ) : (
-          <Card accent={C.purple}>
-            <View style={{ padding: 24, alignItems: 'center' }}>
-              <Ionicons name="barbell-outline" size={32} color={C.muted} />
-              <Text style={{ color: C.muted, marginTop: 8, textAlign: 'center', fontSize: 13 }}>
-                Log workouts to see completion charts
-              </Text>
-            </View>
-          </Card>
-        )}
-      </View>
     </>
   );
 }

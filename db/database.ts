@@ -1,4 +1,6 @@
 import * as SQLite from 'expo-sqlite';
+import { BODYWEIGHT_EXERCISES } from '../constants/theme';
+import { LEGACY_EXERCISE_NAMES } from '../constants/legacyExerciseNames';
 
 type DbRunResult = {
   changes: number;
@@ -10,6 +12,7 @@ type DbLike = {
   runSync: (source: string, params?: any[]) => DbRunResult;
   getFirstSync: <T>(source: string, params?: any[]) => T | null;
   getAllSync: <T>(source: string, params?: any[]) => T[];
+  withTransactionSync: (task: () => void) => void;
 };
 
 let _db: DbLike | null = null;
@@ -171,6 +174,8 @@ export function initializeDatabase(): void {
     );
   `);
 
+  runMigrations(db);
+
   const goalCount = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM goals');
   if (!goalCount || goalCount.c === 0) {
     db.execSync(`
@@ -217,12 +222,113 @@ export function initializeDatabase(): void {
   `);
 }
 
-export function todayStr(): string {
-  const d = new Date();
+// ── Schema migrations ───────────────────────────────────────────────────────
+// CREATE TABLE IF NOT EXISTS never changes an existing table, so every schema
+// change after v1 must be appended here (never edit or reorder old entries).
+// Each entry runs once, in order, and bumps PRAGMA user_version.
+// Example: (db) => db.execSync('ALTER TABLE food_log ADD COLUMN carbs REAL DEFAULT 0'),
+const MIGRATIONS: ((db: DbLike) => void)[] = [
+  // v1: baseline schema created in initializeDatabase()
+  () => {},
+  // v2: user-created exercises, so custom lifts keep their muscle group
+  (db) => db.execSync(`
+    CREATE TABLE IF NOT EXISTS custom_exercises (
+      name TEXT PRIMARY KEY COLLATE NOCASE,
+      muscle_group TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `),
+  // v3: every PR attempt is its own editable entry; custom exercises can be reps-only
+  (db) => {
+    db.execSync(`
+      CREATE TABLE IF NOT EXISTS pr_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        exercise_name TEXT NOT NULL,
+        entry_date TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 0,
+        reps INTEGER NOT NULL DEFAULT 1,
+        unit TEXT DEFAULT 'kg',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_pr_entries_exercise ON pr_entries (exercise_name, entry_date);
+      INSERT INTO pr_entries (exercise_name, entry_date, weight, reps, unit)
+        SELECT DISTINCT exercise_name, record_date, weight, COALESCE(reps, 1), COALESCE(unit, 'kg') FROM (
+          SELECT exercise_name, record_date, weight, reps, unit FROM pr_history
+          UNION ALL
+          SELECT exercise_name, record_date, weight, reps, unit FROM personal_records
+        ) ORDER BY record_date;
+      ALTER TABLE custom_exercises ADD COLUMN kind TEXT NOT NULL DEFAULT 'weight';
+    `);
+    const names = db.getAllSync<{ exercise_name: string }>('SELECT DISTINCT exercise_name FROM pr_entries');
+    names.forEach(n => syncPersonalRecord(db, n.exercise_name));
+  },
+  // v4: reminder schedule (notifications themselves are scheduled by utils/reminders.ts)
+  (db) => db.execSync(`
+    CREATE TABLE IF NOT EXISTS reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      hour INTEGER NOT NULL,
+      minute INTEGER NOT NULL,
+      days TEXT NOT NULL DEFAULT '0123456',
+      enabled INTEGER NOT NULL DEFAULT 1
+    );
+    INSERT INTO reminders (kind, label, hour, minute) VALUES
+      ('creatine', 'Take creatine', 9, 0),
+      ('water', 'Drink water', 11, 0),
+      ('protein', 'Protein check', 13, 30),
+      ('water', 'Drink water', 15, 0),
+      ('workout', 'Workout time', 18, 0),
+      ('water', 'Drink water', 20, 0);
+  `),
+  // v5: no suggested reminders — remove v4's starter set unless the user changed it
+  (db) => db.execSync(`
+    DELETE FROM reminders WHERE days = '0123456' AND enabled = 1 AND (
+      (kind = 'creatine' AND label = 'Take creatine' AND hour = 9 AND minute = 0) OR
+      (kind = 'water' AND label = 'Drink water' AND hour IN (11, 15, 20) AND minute = 0) OR
+      (kind = 'protein' AND label = 'Protein check' AND hour = 13 AND minute = 30) OR
+      (kind = 'workout' AND label = 'Workout time' AND hour = 18 AND minute = 0)
+    );
+  `),
+  // v6: exercises now use free-exercise-db names — rename saved data from the old app names
+  (db) => {
+    for (const [oldName, newName] of Object.entries(LEGACY_EXERCISE_NAMES)) {
+      for (const table of ['exercise_logs', 'workout_plan_exercises', 'pr_entries', 'pr_history']) {
+        db.runSync(`UPDATE ${table} SET exercise_name=? WHERE exercise_name=?`, [newName, oldName]);
+      }
+      // Unique-keyed tables: rename unless the new name already exists, then drop leftovers
+      db.runSync('UPDATE OR IGNORE starred_pr_exercises SET exercise_name=? WHERE exercise_name=?', [newName, oldName]);
+      db.runSync('DELETE FROM starred_pr_exercises WHERE exercise_name=?', [oldName]);
+      db.runSync('DELETE FROM personal_records WHERE exercise_name=?', [oldName]);
+    }
+    // personal_records is rebuilt from the (renamed) entries
+    new Set(Object.values(LEGACY_EXERCISE_NAMES)).forEach(n => syncPersonalRecord(db, n));
+  },
+];
+
+function runMigrations(db: DbLike): void {
+  let version = db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version ?? 0;
+  while (version < MIGRATIONS.length) {
+    const migrate = MIGRATIONS[version];
+    const next = version + 1;
+    db.withTransactionSync(() => {
+      migrate(db);
+      db.execSync(`PRAGMA user_version = ${next}`);
+    });
+    version = next;
+  }
+}
+
+/** Local-time YYYY-MM-DD (never use toISOString for dates — it is UTC). */
+export function toDateStr(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function todayStr(): string {
+  return toDateStr(new Date());
 }
 
 function calculate1RM(weight: number, reps: number): number {
@@ -482,6 +588,30 @@ export function deleteWorkoutPlanExercise(id: number): void {
   getDb().runSync('DELETE FROM workout_plan_exercises WHERE id=?', [id]);
 }
 
+export interface WeeklyPlanDay {
+  dayOfWeek: string;
+  planName: string;
+  muscleGroups: string;                              // comma-separated, or 'Rest'
+  exercises: { name: string; muscle: string }[];
+}
+
+/** Replace the whole weekly plan (names, muscle groups and exercises) in one transaction. */
+export function replaceWeeklyPlan(days: WeeklyPlanDay[]): void {
+  const db = getDb();
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM workout_plan_exercises');
+    for (const d of days) {
+      updateWorkoutPlan(d.dayOfWeek, d.planName, d.muscleGroups);
+      for (const ex of d.exercises) {
+        db.runSync(
+          'INSERT INTO workout_plan_exercises (day_of_week, exercise_name, muscle_group) VALUES (?, ?, ?)',
+          [d.dayOfWeek, ex.name, ex.muscle]
+        );
+      }
+    }
+  });
+}
+
 export interface WorkoutSession {
   id: number;
   session_date: string;
@@ -528,6 +658,49 @@ export function logExercise(
   unit = 'kg'
 ): void {
   const db = getDb();
+  db.withTransactionSync(() => {
+    insertExercise(db, sessionId, sessionDate, exerciseName, muscleGroup, sets, reps, weight, unit);
+  });
+}
+
+export interface NewExercise {
+  exercise: string;
+  muscleGroup: string;
+  sets: number;
+  reps: number;
+  weight: number;
+  unit?: string;
+}
+
+/** Create a session and log all its exercises atomically. Returns the session id. */
+export function logWorkoutSession(
+  sessionDate: string,
+  muscleGroups: string,
+  notes: string,
+  exercises: NewExercise[]
+): number {
+  const db = getDb();
+  let sessionId = 0;
+  db.withTransactionSync(() => {
+    sessionId = createWorkoutSession(sessionDate, muscleGroups, notes);
+    for (const ex of exercises) {
+      insertExercise(db, sessionId, sessionDate, ex.exercise, ex.muscleGroup, ex.sets, ex.reps, ex.weight, ex.unit);
+    }
+  });
+  return sessionId;
+}
+
+function insertExercise(
+  db: DbLike,
+  sessionId: number,
+  sessionDate: string,
+  exerciseName: string,
+  muscleGroup: string,
+  sets: number,
+  reps: number,
+  weight: number,
+  unit = 'kg'
+): void {
   db.runSync(
     `INSERT INTO exercise_logs
      (session_id, session_date, exercise_name, muscle_group, sets, reps, weight, unit)
@@ -627,6 +800,97 @@ export interface PR {
   one_rep_max: number;
 }
 
+// ── PR scoring & entries ───────────────────────────────────────────────────
+// personal_records holds the current best per exercise (one_rep_max = score);
+// pr_entries holds every attempt and is the source of truth for it.
+
+/** Reps-only lifts: built-in bodyweight moves, or custom exercises created as reps-only. */
+export function isRepsOnly(exerciseName: string): boolean {
+  const custom = getDb().getFirstSync<{ kind: string }>(
+    'SELECT kind FROM custom_exercises WHERE name=?', [exerciseName]
+  );
+  return custom ? custom.kind === 'reps' : BODYWEIGHT_EXERCISES.includes(exerciseName);
+}
+
+/** Comparable PR score: max reps for reps-only lifts, Epley e1RM otherwise. */
+export function prScore(exerciseName: string, weight: number, reps: number): number {
+  return isRepsOnly(exerciseName) ? reps : calculate1RM(weight, reps);
+}
+
+export interface PREntry {
+  id: number;
+  exercise_name: string;
+  entry_date: string;
+  weight: number;
+  reps: number;
+  unit: string;
+}
+
+/** Recompute the current best for one exercise from its entries. */
+function syncPersonalRecord(db: DbLike, exerciseName: string): void {
+  const entries = db.getAllSync<PREntry>(
+    'SELECT * FROM pr_entries WHERE exercise_name=? ORDER BY entry_date, id', [exerciseName]
+  );
+  let best: PREntry | null = null;
+  let bestScore = -Infinity;
+  for (const e of entries) {
+    const score = prScore(exerciseName, e.weight, e.reps);
+    if (score > bestScore) { best = e; bestScore = score; }
+  }
+  if (!best) {
+    db.runSync('DELETE FROM personal_records WHERE exercise_name=?', [exerciseName]);
+    return;
+  }
+  db.runSync(
+    `INSERT OR REPLACE INTO personal_records
+     (exercise_name, record_date, sets, reps, weight, unit, one_rep_max)
+     VALUES (?, ?, 1, ?, ?, ?, ?)`,
+    [exerciseName, best.entry_date, best.reps, best.weight, best.unit, bestScore]
+  );
+}
+
+export function getPREntries(exerciseName: string): PREntry[] {
+  return getDb().getAllSync<PREntry>(
+    'SELECT * FROM pr_entries WHERE exercise_name=? ORDER BY entry_date, id', [exerciseName]
+  );
+}
+
+export function getAllPREntries(): PREntry[] {
+  return getDb().getAllSync<PREntry>('SELECT * FROM pr_entries ORDER BY exercise_name, entry_date, id');
+}
+
+export function addPREntry(exerciseName: string, entryDate: string, weight: number, reps: number, unit = 'kg'): void {
+  const db = getDb();
+  db.withTransactionSync(() => {
+    db.runSync(
+      'INSERT INTO pr_entries (exercise_name, entry_date, weight, reps, unit) VALUES (?, ?, ?, ?, ?)',
+      [exerciseName, entryDate, weight, reps, unit]
+    );
+    syncPersonalRecord(db, exerciseName);
+  });
+}
+
+export function updatePREntry(id: number, entryDate: string, weight: number, reps: number): void {
+  const db = getDb();
+  const row = db.getFirstSync<PREntry>('SELECT * FROM pr_entries WHERE id=?', [id]);
+  if (!row) return;
+  db.withTransactionSync(() => {
+    db.runSync('UPDATE pr_entries SET entry_date=?, weight=?, reps=? WHERE id=?', [entryDate, weight, reps, id]);
+    syncPersonalRecord(db, row.exercise_name);
+  });
+}
+
+export function deletePREntry(id: number): void {
+  const db = getDb();
+  const row = db.getFirstSync<PREntry>('SELECT * FROM pr_entries WHERE id=?', [id]);
+  if (!row) return;
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM pr_entries WHERE id=?', [id]);
+    syncPersonalRecord(db, row.exercise_name);
+  });
+}
+
+/** Called for every logged workout set: a set that beats the current best becomes a PR entry. */
 function checkAndUpdatePR(
   db: DbLike,
   exerciseName: string,
@@ -636,32 +900,14 @@ function checkAndUpdatePR(
   weight: number,
   unit: string
 ): void {
-  const oneRepMax = calculate1RM(weight, reps);
+  const score = prScore(exerciseName, weight, reps);
   const existing = db.getFirstSync<PR>('SELECT * FROM personal_records WHERE exercise_name=?', [exerciseName]);
-  if (!existing || oneRepMax > existing.one_rep_max) {
-    if (existing) {
-      db.runSync(
-        `INSERT INTO pr_history
-         (exercise_name, record_date, sets, reps, weight, unit, one_rep_max)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          existing.exercise_name,
-          existing.record_date,
-          existing.sets,
-          existing.reps,
-          existing.weight,
-          existing.unit,
-          existing.one_rep_max,
-        ]
-      );
-    }
-
+  if (!existing || score > existing.one_rep_max) {
     db.runSync(
-      `INSERT OR REPLACE INTO personal_records
-       (exercise_name, record_date, sets, reps, weight, unit, one_rep_max)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [exerciseName, recordDate, sets, reps, weight, unit, oneRepMax]
+      'INSERT INTO pr_entries (exercise_name, entry_date, weight, reps, unit) VALUES (?, ?, ?, ?, ?)',
+      [exerciseName, recordDate, weight, reps, unit]
     );
+    syncPersonalRecord(db, exerciseName);
   }
 }
 
@@ -675,7 +921,7 @@ export function checkPRForLog(
   oldPR: PR | null;
   new1RM: number;
 } {
-  const new1RM = calculate1RM(weight, reps);
+  const new1RM = prScore(exerciseName, weight, reps);
   const existing = getDb().getFirstSync<PR>('SELECT * FROM personal_records WHERE exercise_name=?', [exerciseName]);
 
   return {
@@ -687,44 +933,6 @@ export function checkPRForLog(
 
 export function getAllPRs(): PR[] {
   return getDb().getAllSync<PR>('SELECT * FROM personal_records ORDER BY exercise_name');
-}
-
-/** All distinct dates where any PR was logged (for calendar dots). */
-export function getPRDates(): string[] {
-  const db = getDb();
-  const rows = db.getAllSync<{ d: string }>(`
-    SELECT DISTINCT record_date as d FROM pr_history
-    UNION
-    SELECT DISTINCT record_date as d FROM personal_records
-    ORDER BY d ASC
-  `);
-  return rows.map(r => r.d).filter(Boolean);
-}
-
-/** Most recent N PR entries across all exercises (newest first).
- *  Unions pr_history (old PRs) + personal_records (current best, incl. first-time & custom)
- *  so custom exercises logged for the first time always appear. */
-export function getRecentPRHistory(limit = 10): (PRProgressionEntry & { one_rep_max?: number })[] {
-  const db = getDb();
-  const rows = db.getAllSync<PRProgressionEntry & { one_rep_max?: number }>(`
-    SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
-    FROM pr_history
-    UNION ALL
-    SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
-    FROM personal_records
-    ORDER BY session_date DESC
-    LIMIT ?
-  `, [limit * 2]); // fetch extra to allow dedup
-
-  // Deduplicate: keep only the first (most recent) entry per exercise+weight+reps combo
-  const seen = new Set<string>();
-  const deduped = rows.filter(e => {
-    const key = `${e.exercise_name}-${e.weight}-${e.reps}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return deduped.slice(0, limit);
 }
 
 /** Star / unstar an exercise for the PR pinboard. */
@@ -750,57 +958,62 @@ export function isPRExerciseStarred(exerciseName: string): boolean {
   return !!r;
 }
 
-/** All PR entries (history + current) logged on a specific date. */
-export function getPRsForDate(date: string): (PRProgressionEntry & { one_rep_max?: number })[] {
-  const db = getDb();
-  const fromHistory = db.getAllSync<PRProgressionEntry & { one_rep_max?: number }>(
-    `SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
-     FROM pr_history WHERE record_date=? ORDER BY id ASC`,
-    [date]
-  );
-  const fromCurrent = db.getAllSync<PRProgressionEntry & { one_rep_max?: number }>(
-    `SELECT record_date AS session_date, exercise_name, sets, reps, weight, unit, one_rep_max
-     FROM personal_records WHERE record_date=? ORDER BY exercise_name ASC`,
-    [date]
-  );
-  // Merge, deduplicate by exercise+weight+reps
-  const all = [...fromHistory, ...fromCurrent];
-  const seen = new Set<string>();
-  return all.filter(e => {
-    const key = `${e.exercise_name}-${e.weight}-${e.reps}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+// ── Reminders ──────────────────────────────────────────────────────────────
+export type ReminderKind = 'water' | 'protein' | 'creatine' | 'workout' | 'custom';
+
+export interface Reminder {
+  id: number;
+  kind: ReminderKind;
+  label: string;
+  hour: number;
+  minute: number;
+  days: string;    // weekdays as getDay() digits, e.g. '0123456' = every day
+  enabled: number;
 }
 
-export function logPRManually(
-  exerciseName: string,
-  sets: number,
-  reps: number,
-  weight: number,
-  unit = 'kg',
-  recordDate?: string
-): void {
-  const db = getDb();
-  const d = recordDate || todayStr();
-  const oneRepMax = calculate1RM(weight, reps);
-  const existing = db.getFirstSync<PR>('SELECT * FROM personal_records WHERE exercise_name=?', [exerciseName]);
+export function getReminders(): Reminder[] {
+  return getDb().getAllSync<Reminder>('SELECT * FROM reminders ORDER BY hour, minute, id');
+}
 
-  // Archive old PR to history first
-  if (existing) {
-    db.runSync(
-      `INSERT INTO pr_history (exercise_name, record_date, sets, reps, weight, unit, one_rep_max)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [existing.exercise_name, existing.record_date, existing.sets, existing.reps, existing.weight, existing.unit, existing.one_rep_max]
-    );
-  }
+export function addReminder(
+  kind: ReminderKind, label: string, hour: number, minute: number, days = '0123456', enabled = 1
+): number {
+  return getDb().runSync(
+    'INSERT INTO reminders (kind, label, hour, minute, days, enabled) VALUES (?, ?, ?, ?, ?, ?)',
+    [kind, label, hour, minute, days, enabled]
+  ).lastInsertRowId;
+}
 
-  // Upsert the new PR
-  db.runSync(
-    `INSERT OR REPLACE INTO personal_records (exercise_name, record_date, sets, reps, weight, unit, one_rep_max)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [exerciseName, d, sets, reps, weight, unit, oneRepMax]
+export function updateReminder(id: number, fields: Partial<Omit<Reminder, 'id'>>): void {
+  const keys = Object.keys(fields);
+  if (!keys.length) return;
+  getDb().runSync(
+    `UPDATE reminders SET ${keys.map(k => `${k}=?`).join(',')} WHERE id=?`,
+    [...Object.values(fields), id]
+  );
+}
+
+export function deleteReminder(id: number): void {
+  getDb().runSync('DELETE FROM reminders WHERE id=?', [id]);
+}
+
+// ── Custom exercises ───────────────────────────────────────────────────────
+export type ExerciseKind = 'weight' | 'reps';
+
+export interface CustomExercise {
+  name: string;
+  muscle_group: string;
+  kind: ExerciseKind;
+}
+
+export function getCustomExercises(): CustomExercise[] {
+  return getDb().getAllSync<CustomExercise>('SELECT name, muscle_group, kind FROM custom_exercises ORDER BY name');
+}
+
+export function addCustomExercise(name: string, muscleGroup: string, kind: ExerciseKind = 'weight'): void {
+  getDb().runSync(
+    'INSERT OR REPLACE INTO custom_exercises (name, muscle_group, kind) VALUES (?, ?, ?)',
+    [name, muscleGroup, kind]
   );
 }
 
@@ -845,41 +1058,60 @@ export interface Streak {
   longest_streak: number;
 }
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Consecutive workout days ending today. Today only counts once trained (it
+ * never breaks the streak while the day is still in progress), and days the
+ * weekly plan marks as 'Rest' are skipped without breaking it.
+ */
+function computeCurrentStreak(db: DbLike): number {
+  const rows = db.getAllSync<{ log_date: string }>(
+    'SELECT log_date FROM daily_logs WHERE workout_completed=1 ORDER BY log_date ASC'
+  );
+  if (!rows.length) return 0;
+  const done = new Set(rows.map(r => r.log_date));
+  const earliest = rows[0].log_date;
+
+  const restDays = new Set(
+    db.getAllSync<{ day_of_week: string }>("SELECT day_of_week FROM workout_plans WHERE muscle_groups='Rest'")
+      .map(r => r.day_of_week)
+  );
+
+  let current = 0;
+  const cursor = new Date();
+  if (done.has(toDateStr(cursor))) current++;
+  for (;;) {
+    cursor.setDate(cursor.getDate() - 1);
+    const ds = toDateStr(cursor);
+    if (ds < earliest) break;
+    if (done.has(ds)) current++;
+    else if (!restDays.has(DAY_NAMES[cursor.getDay()])) break;
+  }
+  return current;
+}
+
 export function getStreak(): Streak {
-  return getDb().getFirstSync<Streak>('SELECT * FROM streaks WHERE streak_type=?', ['workout']) ||
+  const db = getDb();
+  const stored = db.getFirstSync<Streak>('SELECT * FROM streaks WHERE streak_type=?', ['workout']) ||
   {
     id: 1,
     streak_type: 'workout',
     current_streak: 0,
     longest_streak: 0,
   };
+  // Recompute on read so a missed day shows up without waiting for the next log
+  const current = computeCurrentStreak(db);
+  return { ...stored, current_streak: current, longest_streak: Math.max(stored.longest_streak, current) };
 }
 
 export function updateStreak(): void {
   const db = getDb();
-  const rows = db.getAllSync<{ log_date: string }>(
-    'SELECT log_date FROM daily_logs WHERE workout_completed=1 ORDER BY log_date DESC'
-  );
-  if (!rows.length) return;
-
-  const today = new Date();
-  let current = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const expected = new Date(today);
-    expected.setDate(today.getDate() - i);
-
-    const expStr = expected.toISOString().split('T')[0];
-
-    if (rows[i].log_date === expStr) current++;
-    else break;
-  }
-
-  const existing = getStreak();
-  const longest = Math.max(existing.longest_streak, current);
+  const { current_streak, longest_streak } = getStreak();
 
   db.runSync('UPDATE streaks SET current_streak=?, longest_streak=?, last_updated=? WHERE streak_type=?', [
-    current,
-    longest,
+    current_streak,
+    longest_streak,
     todayStr(),
     'workout',
   ]);
@@ -896,10 +1128,12 @@ export interface WeeklyStats {
 export function getWeeklyStats(): WeeklyStats {
   const db = getDb();
   const now = new Date();
+  // Weeks start on Monday; on Sunday getDay() is 0, so go back 6 days, not forward 1
+  const daysSinceMonday = (now.getDay() + 6) % 7;
   const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - now.getDay() + 1);
+  weekStart.setDate(now.getDate() - daysSinceMonday);
 
-  const ws = weekStart.toISOString().split('T')[0];
+  const ws = toDateStr(weekStart);
 
   const q = (sql: string) => (db.getFirstSync<{ c: number }>(sql, [ws])?.c) ?? 0;
 
@@ -908,14 +1142,14 @@ export function getWeeklyStats(): WeeklyStats {
     waterSuccess: q('SELECT COUNT(*) as c FROM daily_logs WHERE log_date>=? AND water_goal_reached=1'),
     proteinSuccess: q('SELECT COUNT(*) as c FROM daily_logs WHERE log_date>=? AND protein_goal_reached=1'),
     creatineTaken: q('SELECT COUNT(*) as c FROM daily_logs WHERE log_date>=? AND creatine_taken=1'),
-    daysElapsed: now.getDay() || 7,
+    daysElapsed: daysSinceMonday + 1,
   };
 }
 
 export function getLastNDaysLogs(n = 30): DailyLog[] {
   const start = new Date();
   start.setDate(start.getDate() - n);
-  const s = start.toISOString().split('T')[0];
+  const s = toDateStr(start);
 
   return getDb().getAllSync<DailyLog>('SELECT * FROM daily_logs WHERE log_date>=? ORDER BY log_date ASC', [s]);
 }
@@ -937,8 +1171,22 @@ export function resetDatabase(): void {
     DROP TABLE IF EXISTS workout_plans;
     DROP TABLE IF EXISTS workout_plan_exercises;
     DROP TABLE IF EXISTS settings;
+    DROP TABLE IF EXISTS progress_photos;
+    DROP TABLE IF EXISTS starred_pr_exercises;
+    DROP TABLE IF EXISTS custom_exercises;
+    DROP TABLE IF EXISTS pr_entries;
+    DROP TABLE IF EXISTS reminders;
+    PRAGMA user_version = 0;
   `);
+  // user_version is reset so migrations re-apply on top of the fresh baseline tables
   initializeDatabase();
+}
+
+/** Every stored progress photo file, so callers can delete them alongside a reset. */
+export function getAllProgressPhotoUris(): string[] {
+  return getDb()
+    .getAllSync<{ uri: string }>('SELECT uri FROM progress_photos')
+    .map(r => r.uri);
 }
 
 // ── Progress Photos ────────────────────────────────────────────────────────

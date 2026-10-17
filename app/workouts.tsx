@@ -27,6 +27,7 @@ import {
   getExercisesForDate,
   getWorkoutSessions,
   checkPRForLog,
+  isRepsOnly,
   updateDailyLog,
   updateStreak,
   todayStr,
@@ -37,6 +38,9 @@ import {
 } from '../db/database';
 import { Card, Btn, MuscleTag, SectionHeader, EmptyState } from '../components/ui';
 import BodyAnatomy from '../components/BodyAnatomy';
+import { ExerciseGuideButton } from '../components/ExerciseGuide';
+import { findExercise } from '../constants/exerciseCatalog';
+import { SplitWizard, SplitCard, getSplitConfig } from '../components/SplitWizard';
 import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -140,6 +144,21 @@ function GroupedExercisePicker({
   const exercises = EXERCISE_LIBRARY[activeTab] || [];
   const activeColor = C.mg[activeTab] || C.accent;
 
+  // Search covers every muscle group, not just this day's; otherwise show the tab
+  // with a header for each movement type (the library is pre-sorted by type)
+  const [query, setQuery] = useState('');
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const searching = words.length > 0;
+  const rows: { ex: string; muscle: string; header?: string }[] = searching
+    ? Object.entries(EXERCISE_LIBRARY)
+        .flatMap(([g, list]) => list.filter(e => words.every(w => e.toLowerCase().includes(w))).map(ex => ({ ex, muscle: g })))
+        .slice(0, 120)
+    : exercises.map((ex, i) => {
+        const pattern = findExercise(ex)?.pattern;
+        const prev = i > 0 ? findExercise(exercises[i - 1])?.pattern : undefined;
+        return { ex, muscle: activeTab, header: pattern !== prev ? pattern : undefined };
+      });
+
   return (
     <View style={{ flex: 1 }}>
 
@@ -198,8 +217,26 @@ function GroupedExercisePicker({
         })}
       </ScrollView>
 
+      {/* ── Search every exercise ── */}
+      <View style={neuStyles.searchBox}>
+        <Ionicons name="search" size={16} color={C.muted} />
+        <TextInput
+          style={neuStyles.searchInput}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search all exercises"
+          placeholderTextColor={C.muted}
+          returnKeyType="search"
+        />
+        {searching && (
+          <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close-circle" size={18} color={C.muted} />
+          </TouchableOpacity>
+        )}
+      </View>
+
       {/* ── Exercise list for active tab ── */}
-      <ScrollView style={neuStyles.exListScroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={neuStyles.exListScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* Custom exercise creation row */}
         {!showCustom ? (
@@ -256,26 +293,36 @@ function GroupedExercisePicker({
           </View>
         )}
 
-        {/* Exercise rows */}
-        {exercises.map((ex, idx) => {
+        {/* Exercise rows — grouped by movement type, or search results across every group */}
+        {searching && rows.length === 0 && (
+          <Text style={neuStyles.noResults}>No exercises match "{query.trim()}"</Text>
+        )}
+        {rows.map(({ ex, muscle, header }, idx) => {
           const sel = isSelected(ex);
+          const col = C.mg[muscle] || C.accent;
           return (
-            <TouchableOpacity
-              key={ex}
-              style={[
-                neuStyles.exOptRow,
-                sel && { backgroundColor: activeColor + '18' },
-                idx === exercises.length - 1 && { borderBottomWidth: 0 },
-              ]}
-              onPress={() => toggle(activeTab, ex)}
-              activeOpacity={0.7}
-            >
-              <View style={[neuStyles.exCheckbox, sel && { backgroundColor: activeColor, borderColor: activeColor }]}>
-                {sel && <Text style={neuStyles.exCheckmark}>✓</Text>}
-              </View>
-              <View style={[neuStyles.exDot, { backgroundColor: activeColor }]} />
-              <Text style={[neuStyles.exOptText, sel && { color: C.text, fontWeight: '700' }]}>{ex}</Text>
-            </TouchableOpacity>
+            <React.Fragment key={`${muscle}-${ex}`}>
+              {header && <Text style={neuStyles.patternHeader}>{header}</Text>}
+              <TouchableOpacity
+                style={[
+                  neuStyles.exOptRow,
+                  sel && { backgroundColor: col + '18' },
+                  idx === rows.length - 1 && { borderBottomWidth: 0 },
+                ]}
+                onPress={() => toggle(muscle, ex)}
+                activeOpacity={0.7}
+              >
+                <View style={[neuStyles.exCheckbox, sel && { backgroundColor: col, borderColor: col }]}>
+                  {sel && <Text style={neuStyles.exCheckmark}>✓</Text>}
+                </View>
+                <View style={[neuStyles.exDot, { backgroundColor: col }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[neuStyles.exOptText, sel && { color: C.text, fontWeight: '700' }]}>{ex}</Text>
+                  {searching && <Text style={neuStyles.exOptMeta}>{muscle} · {findExercise(ex)?.pattern}</Text>}
+                </View>
+                <ExerciseGuideButton name={ex} color={col} />
+              </TouchableOpacity>
+            </React.Fragment>
           );
         })}
       </ScrollView>
@@ -502,9 +549,12 @@ function ExerciseLogCard({
             </TouchableOpacity>
           )}
         </View>
-        <Text style={{ fontSize: 13, color: C.mg[ex.muscle_group], marginBottom: 12, fontWeight: '700' }}>
-          {ex.muscle_group.toUpperCase()}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <Text style={{ fontSize: 13, color: C.mg[ex.muscle_group], fontWeight: '700' }}>
+            {ex.muscle_group.toUpperCase()}
+          </Text>
+          <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} variant="pill" />
+        </View>
 
         {loggedSets.length > 0 && (
           <View style={{ marginBottom: 16 }}>
@@ -751,6 +801,7 @@ export default function WorkoutsScreen() {
               deleteWorkoutPlanExercise(id);
               load();
             }}
+            onPlanReplaced={load}
           />
         )}
 
@@ -1150,15 +1201,24 @@ export default function WorkoutsScreen() {
             <Text style={styles.prTitle}>NEW PERSONAL{'\n'}RECORD!</Text>
             <Text style={styles.prExercise}>{prData.exercise}</Text>
             <View style={styles.prDivider} />
-            {prData.oldPR && (
-              <Text style={styles.prOld}>
-                Previous: {prData.oldPR.weight}kg × {prData.oldPR.reps} reps
-              </Text>
+            {isRepsOnly(prData.exercise) ? (
+              <>
+                {prData.oldPR && <Text style={styles.prOld}>Previous: {prData.oldPR.reps} reps</Text>}
+                <Text style={styles.prNew}>{prData.reps} reps</Text>
+              </>
+            ) : (
+              <>
+                {prData.oldPR && (
+                  <Text style={styles.prOld}>
+                    Previous: {prData.oldPR.weight}kg × {prData.oldPR.reps} reps
+                  </Text>
+                )}
+                <Text style={styles.prNew}>
+                  {prData.weight}kg × {prData.reps} reps
+                </Text>
+                <Text style={styles.pr1rm}>e1RM: {prData.new1RM.toFixed(1)} kg</Text>
+              </>
             )}
-            <Text style={styles.prNew}>
-              {prData.weight}kg × {prData.reps} reps
-            </Text>
-            <Text style={styles.pr1rm}>e1RM: {prData.new1RM.toFixed(1)} kg</Text>
             <View style={{ width: '100%', marginTop: 8 }}>
               <Btn label="Let's Go! 🎉" color={C.accent} onPress={() => setPrData(null)} />
             </View>
@@ -1179,6 +1239,7 @@ function PlannerTab({
   onSave,
   onAddExercise,
   onDeleteExercise,
+  onPlanReplaced,
 }: {
   plans: WorkoutPlan[];
   planExercises: WorkoutPlanExercise[];
@@ -1186,14 +1247,19 @@ function PlannerTab({
   onSave: (d: string, n: string, m: string) => void;
   onAddExercise: (day: string, exercise: string, muscle: string) => void;
   onDeleteExercise: (id: number) => void;
+  onPlanReplaced: () => void;
 }) {
   const { C } = useTheme();
   const styles = makeStyles(C);
+  const ps = makePlannerStyles(C);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const planMap = Object.fromEntries(plans.map(p => [p.day_of_week, p]));
   const [edits, setEdits] = useState<Record<string, { name: string; mgs: string[] }>>({});
   const [exerciseDay, setExerciseDay] = useState<string | null>(null);
-  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+  // Days fold up like the Log tab's muscle groups; today starts open
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set([today]));
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [splitConfig, setSplitConfig] = useState(() => getSplitConfig());
 
   const getEdit = (day: string) =>
     edits[day] || {
@@ -1212,40 +1278,65 @@ function PlannerTab({
     updateEdit(day, 'mgs', mgs);
   };
 
+  const toggleDay = (day: string) =>
+    setExpandedDays(prev => {
+      const next = new Set(prev);
+      next.has(day) ? next.delete(day) : next.add(day);
+      return next;
+    });
+
   // Which muscle groups are selected for the current exercise day
+  // Planner chips say 'Upper Back' / 'Lower Back'; the exercise library files both under 'Back'
+  const toLibraryGroup = (mg: string) => (mg === 'Upper Back' || mg === 'Lower Back' ? 'Back' : mg);
   const exerciseMuscles = exerciseDay
-    ? getEdit(exerciseDay).mgs.filter(mg => mg !== 'Rest' && EXERCISE_LIBRARY[mg])
+    ? [...new Set(getEdit(exerciseDay).mgs.map(toLibraryGroup))].filter(mg => EXERCISE_LIBRARY[mg])
     : [];
-  const musclesForPicker = exerciseMuscles.length ? exerciseMuscles : MUSCLE_GROUPS;
+  const musclesForPicker = exerciseMuscles.length ? exerciseMuscles : Object.keys(EXERCISE_LIBRARY);
 
-  return (
-    <>
-      <SectionHeader title="Weekly Plan" />
+  const renderDay = (day: string) => {
+    const isToday = day === today;
+    const edit = getEdit(day);
+    const exercisesForDay = planExercises.filter(ex => ex.day_of_week === day);
+    const expanded = expandedDays.has(day);
+    const groups = edit.mgs.filter(mg => mg !== 'Rest');
+    const isRest = edit.mgs.includes('Rest') || (!groups.length && !exercisesForDay.length);
 
-      {DAYS.map(day => {
-        const isToday = day === today;
-        const edit = getEdit(day);
-        const exercisesForDay = planExercises.filter(ex => ex.day_of_week === day);
-
-        return (
-          <View
-            key={day}
-            style={[styles.planCard, isToday && styles.planCardToday]}
-            onLayout={(e: LayoutChangeEvent) => {
-              if (dayOffsets) dayOffsets.current[day] = e.nativeEvent.layout.y;
-            }}
-          >
-            <View style={styles.planHeader}>
-              <Text style={[styles.planDay, isToday && { color: C.accent }]}>
-                {isToday ? '▶ ' : ''}{day}
-              </Text>
+    return (
+      <View
+        key={day}
+        style={[ps.card, isToday && ps.cardToday]}
+        onLayout={(e: LayoutChangeEvent) => {
+          if (dayOffsets) dayOffsets.current[day] = e.nativeEvent.layout.y;
+        }}
+      >
+        <TouchableOpacity style={ps.head} onPress={() => toggleDay(day)} activeOpacity={0.75}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[ps.day, isToday && { color: C.accent }]}>{day}</Text>
               {isToday && (
                 <View style={styles.todayBadge}>
                   <Text style={styles.todayText}>TODAY</Text>
                 </View>
               )}
             </View>
+            <Text style={ps.sub} numberOfLines={1}>
+              {isRest
+                ? 'Rest day'
+                : `${edit.name || 'Workout'} · ${exercisesForDay.length} exercise${exercisesForDay.length === 1 ? '' : 's'}`}
+            </Text>
+          </View>
+          {!isRest && (
+            <View style={ps.dots}>
+              {groups.slice(0, 4).map(mg => (
+                <View key={mg} style={[ps.dot, { backgroundColor: C.mg[mg] || C.accent }]} />
+              ))}
+            </View>
+          )}
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={isToday ? C.accent : C.muted} />
+        </TouchableOpacity>
 
+        {expanded && (
+          <View style={ps.body}>
             <TextInput
               style={styles.input}
               value={edit.name}
@@ -1258,22 +1349,13 @@ function PlannerTab({
               {[...MUSCLE_GROUPS, 'Rest'].map(mg => {
                 const sel = edit.mgs.includes(mg);
                 const col = mg === 'Rest' ? C.muted : C.mg[mg] || C.accent;
-
                 return (
                   <TouchableOpacity
                     key={mg}
-                    style={[
-                      styles.mgPill,
-                      {
-                        borderColor: sel ? col : C.border,
-                        backgroundColor: sel ? col + '22' : C.bg,
-                      },
-                    ]}
+                    style={[styles.mgPill, { borderColor: sel ? col : C.border, backgroundColor: sel ? col + '22' : C.bg }]}
                     onPress={() => togglePlanMG(day, mg)}
                   >
-                    <Text style={[styles.mgPillText, { color: sel ? col : C.muted }]}>
-                      {mg}
-                    </Text>
+                    <Text style={[styles.mgPillText, { color: sel ? col : C.muted }]}>{mg}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -1281,55 +1363,27 @@ function PlannerTab({
 
             {exercisesForDay.length > 0 && (
               <View style={styles.plannedList}>
-                {/* Collapse/Expand toggle */}
-                <TouchableOpacity
-                  style={styles.viewExBtn}
-                  onPress={() =>
-                    setExpandedDays(prev => {
-                      const next = new Set(prev);
-                      next.has(day) ? next.delete(day) : next.add(day);
-                      return next;
-                    })
-                  }
-                  activeOpacity={0.75}
-                >
-                  <Text style={styles.viewExBtnText}>
-                    {expandedDays.has(day)
-                      ? `▲ Hide exercises`
-                      : `▼ View ${exercisesForDay.length} exercise${exercisesForDay.length > 1 ? 's' : ''}`}
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Expanded list */}
-                {expandedDays.has(day) && (
-                  <View style={{ marginTop: 10 }}>
-                    {Object.entries(
-                      exercisesForDay.reduce((acc, ex) => {
-                        if (!acc[ex.muscle_group]) acc[ex.muscle_group] = [];
-                        acc[ex.muscle_group].push(ex);
-                        return acc;
-                      }, {} as Record<string, WorkoutPlanExercise[]>)
-                    ).map(([mg, exList]) => (
-                      <View key={mg}>
-                        <Text style={[styles.plannedMuscleHeader, { color: C.mg[mg] || C.accent }]}>
-                          {mg}
-                        </Text>
-                        {exList.map(ex => (
-                          <View key={ex.id} style={styles.plannedExerciseRow}>
-                            <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
-                            <Text style={styles.exName}>{ex.exercise_name}</Text>
-                            <TouchableOpacity
-                              onPress={() => onDeleteExercise(ex.id)}
-                              style={styles.deletePlanExBtn}
-                            >
-                              <Text style={styles.deletePlanExText}>×</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ))}
+                {Object.entries(
+                  exercisesForDay.reduce((acc, ex) => {
+                    if (!acc[ex.muscle_group]) acc[ex.muscle_group] = [];
+                    acc[ex.muscle_group].push(ex);
+                    return acc;
+                  }, {} as Record<string, WorkoutPlanExercise[]>)
+                ).map(([mg, exList]) => (
+                  <View key={mg}>
+                    <Text style={[styles.plannedMuscleHeader, { color: C.mg[mg] || C.accent }]}>{mg}</Text>
+                    {exList.map(ex => (
+                      <View key={ex.id} style={styles.plannedExerciseRow}>
+                        <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
+                        <Text style={[styles.exName, { flex: 1 }]}>{ex.exercise_name}</Text>
+                        <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} />
+                        <TouchableOpacity onPress={() => onDeleteExercise(ex.id)} style={[styles.deletePlanExBtn, { marginLeft: 10 }]}>
+                          <Text style={styles.deletePlanExText}>×</Text>
+                        </TouchableOpacity>
                       </View>
                     ))}
                   </View>
-                )}
+                ))}
               </View>
             )}
 
@@ -1337,16 +1391,24 @@ function PlannerTab({
               <View style={{ flex: 1, marginRight: 8 }}>
                 <Btn label="+ Exercise" color={C.green} small onPress={() => setExerciseDay(day)} />
               </View>
-              <Btn
-                label="Save"
-                color={C.accent}
-                small
-                onPress={() => onSave(day, edit.name, edit.mgs.join(','))}
-              />
+              <Btn label="Save" color={C.accent} small onPress={() => onSave(day, edit.name, edit.mgs.join(','))} />
             </View>
           </View>
-        );
-      })}
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <>
+      <SectionHeader title="Split" />
+      <SplitCard config={splitConfig} plans={plans} onOpen={() => setWizardOpen(true)} />
+
+      <SectionHeader title="Today" />
+      {renderDay(today)}
+
+      <SectionHeader title="This Week" />
+      {DAYS.filter(d => d !== today).map(renderDay)}
 
       {/* ── Grouped Exercise Picker for Weekly Plan — Multi-select ── */}
       <NeuModal
@@ -1366,8 +1428,32 @@ function PlannerTab({
           }}
         />
       </NeuModal>
+
+      <SplitWizard
+        visible={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onApplied={() => {
+          setSplitConfig(getSplitConfig());
+          setEdits({});
+          setExpandedDays(new Set([today]));
+          onPlanReplaced();
+        }}
+      />
     </>
   );
+}
+
+function makePlannerStyles(C: any) {
+  return StyleSheet.create({
+    card:      { backgroundColor: C.card, borderRadius: 18, borderWidth: 1, borderColor: C.border, marginBottom: 10, overflow: 'hidden' },
+    cardToday: { borderColor: C.accent, borderWidth: 1.5 },
+    head:      { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14 },
+    day:       { fontSize: 16, fontWeight: '800', color: C.text },
+    sub:       { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 2 },
+    dots:      { flexDirection: 'row', gap: 4 },
+    dot:       { width: 8, height: 8, borderRadius: 4 },
+    body:      { paddingHorizontal: 16, paddingBottom: 16, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1787,6 +1873,17 @@ function makeNeuStyles(C: any) { return StyleSheet.create({
     fontSize: 14,
     color: C.textSub,
   },
+  exOptMeta: { fontSize: 11, color: C.muted, fontWeight: '600', marginTop: 1 },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.bg, borderRadius: 12,
+    paddingHorizontal: 12, borderWidth: 1, borderColor: C.border, marginBottom: 8,
+  },
+  searchInput: { flex: 1, paddingVertical: 9, fontSize: 14, color: C.text, fontWeight: '600' },
+  patternHeader: {
+    fontSize: 11, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6,
+    marginTop: 12, marginBottom: 2, paddingHorizontal: 4,
+  },
+  noResults: { fontSize: 13, color: C.muted, fontWeight: '600', textAlign: 'center', paddingVertical: 20 },
   // Checkbox for multi-select
   exCheckbox: {
     width: 20,

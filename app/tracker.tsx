@@ -40,6 +40,7 @@ import {
 } from '../db/database';
 import { Card, Btn, ProgressBar, Ring, PickerModal, SectionHeader } from '../components/ui';
 import { useTheme } from '../contexts/ThemeContext';
+import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { WATER_OPTIONS } from '../constants/theme';
 import FoodScannerModal from '../components/FoodScannerModal';
@@ -83,7 +84,7 @@ export default function TrackerScreen() {
           return [...valid, ...missing];
         }
       }
-    } catch (_) {}
+    } catch (e) { logError('trackerLayout', e); }
     return DEFAULT_SECTIONS;
   });
 
@@ -91,7 +92,8 @@ export default function TrackerScreen() {
   const [editModal, setEditModal] = useState(false);
 
   // Section scroll-to
-  const { openSection } = useLocalSearchParams<{ openSection?: string }>();
+  // `t` changes on every request (e.g. a notification tap) so we re-scroll even if already here
+  const { openSection, t: openNonce } = useLocalSearchParams<{ openSection?: string; t?: string }>();
 
   const load = useCallback(() => {
     setLog(getTodayLog());
@@ -112,7 +114,7 @@ export default function TrackerScreen() {
           }
         }, 350);
       }
-    }, [load, openSection, sections])
+    }, [load, openSection, openNonce, sections])
   );
 
   const onRefresh = () => {
@@ -129,7 +131,7 @@ export default function TrackerScreen() {
     setSections(finalData);
     try {
       setSetting('tracker_sections_order', JSON.stringify(finalData));
-    } catch (_) {}
+    } catch (e) { logError('trackerLayout', e); }
     try { Vibration.vibrate(22); } catch (_) {}
   };
 
@@ -137,7 +139,7 @@ export default function TrackerScreen() {
     setSections(DEFAULT_SECTIONS);
     try {
       setSetting('tracker_sections_order', JSON.stringify(DEFAULT_SECTIONS));
-    } catch (_) {}
+    } catch (e) { logError('trackerLayout', e); }
     showAlert('Reset ✓', 'Tracker widgets layout restored to default.');
   };
 
@@ -147,7 +149,7 @@ export default function TrackerScreen() {
     const next = [...sections];
     [next[fromIdx], next[toIdx]] = [next[toIdx], next[fromIdx]];
     setSections(next);
-    try { setSetting('tracker_sections_order', JSON.stringify(next)); } catch (_) {}
+    try { setSetting('tracker_sections_order', JSON.stringify(next)); } catch (e) { logError('trackerLayout', e); }
   };
 
   const handleEditFromModal = (key: TrackerSectionKey) => {
@@ -182,9 +184,9 @@ export default function TrackerScreen() {
 
   if (!log || !goals) return null;
 
-  const waterPct = Math.min(log.water_intake / goals.water_goal, 1);
-  const proteinPct = Math.min(log.protein_intake / goals.protein_goal, 1);
-  const calPct = Math.min(log.calorie_intake / goals.calorie_goal, 1);
+  const waterPct = goals.water_goal > 0 ? Math.min(log.water_intake / goals.water_goal, 1) : 0;
+  const proteinPct = goals.protein_goal > 0 ? Math.min(log.protein_intake / goals.protein_goal, 1) : 0;
+  const calPct = goals.calorie_goal > 0 ? Math.min(log.calorie_intake / goals.calorie_goal, 1) : 0;
 
   const handleAddWater = (mlStr: string) => {
     const ml = parseInt(mlStr, 10);

@@ -1,6 +1,7 @@
 // utils/workoutParser.ts
 // Natural language → structured workout log parser
 import { EXERCISE_LIBRARY } from '../constants/theme';
+import { catalogName } from '../constants/exerciseCatalog';
 
 export interface ParsedExercise {
   exercise: string;
@@ -100,7 +101,6 @@ const ALIASES: Record<string, string> = {
   'russian twists':   'Russian Twist',
   'farmers walk':     "Farmer's Walk",
   "farmer's walk":    "Farmer's Walk",
-  'dead hang':        'Dead Hang',
   'arnold press':     'Arnold Press',
   'front squat':      'Front Squat',
   'bulgarian':        'Bulgarian Split Squat',
@@ -122,30 +122,28 @@ const ALIASES: Record<string, string> = {
 function resolveExercise(raw: string): { name: string; muscle: string } | null {
   const lower = raw.trim().toLowerCase();
 
-  // Direct alias lookup
-  if (ALIASES[lower]) {
-    const name = ALIASES[lower];
-    const muscle = EXERCISE_MAP[name.toLowerCase()] || 'Other';
-    return { name, muscle };
-  }
+  const resolved = (name: string) => {
+    const n = catalogName(name) ?? name;
+    return { name: n, muscle: EXERCISE_MAP[n.toLowerCase()] || 'Other' };
+  };
 
-  // Fuzzy match against exercise library
-  for (const [ex, muscle] of Object.entries(EXERCISE_MAP)) {
-    if (lower.includes(ex) || ex.includes(lower)) {
-      // find canonical name
-      const canonical = Object.entries(EXERCISE_LIBRARY).find(([, exs]) =>
-        exs.some(e => e.toLowerCase() === ex)
-      );
-      return { name: canonical ? canonical[1].find(e => e.toLowerCase() === ex) || raw : raw, muscle };
-    }
-  }
+  // Any spelling of a catalog exercise ("Lateral Raises", "triceps push-down", "Bench Press") → its catalog name
+  if (catalogName(raw)) return resolved(raw);
 
-  // Partial alias match
+  // Spoken shortcuts ("bench", "rdl", "ohp")
+  if (ALIASES[lower]) return resolved(ALIASES[lower]);
   for (const [alias, name] of Object.entries(ALIASES)) {
-    if (lower.includes(alias)) {
-      const muscle = EXERCISE_MAP[name.toLowerCase()] || 'Other';
-      return { name, muscle };
-    }
+    if (lower.includes(alias)) return resolved(name);
+  }
+
+  // The longest catalog name contained in the text ("did barbell hip thrust 100kg")
+  let best = '';
+  for (const ex of Object.keys(EXERCISE_MAP)) {
+    if (ex.length > best.length && ex.includes(' ') && lower.includes(ex)) best = ex;
+  }
+  if (best) {
+    const name = Object.values(EXERCISE_LIBRARY).flat().find(e => e.toLowerCase() === best) ?? raw;
+    return { name, muscle: EXERCISE_MAP[best] };
   }
 
   // Fall back to the raw text, capitalized, muscle = Other

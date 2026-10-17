@@ -120,16 +120,9 @@ export const NEU = {
 export const MUSCLE_GROUPS = ['Chest','Upper Back','Lower Back','Shoulders','Biceps','Triceps','Legs','Core','Forearms'];
 export const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
-export const EXERCISE_LIBRARY: Record<string, string[]> = {
-  Chest:     ['Bench Press','Incline Bench Press','Decline Bench Press','Dumbbell Fly','Incline Dumbbell Press','Cable Crossover','Push Up','Chest Dip','Pec Deck'],
-  Back:      ['Deadlift','Pull Up','Chin Up','Bent Over Row','Seated Cable Row','Lat Pulldown','Single Arm Dumbbell Row','T-Bar Row','Face Pull','Muscle Up'],
-  Shoulders: ['Overhead Press','Dumbbell Shoulder Press','Arnold Press','Lateral Raise','Front Raise','Rear Delt Fly','Upright Row','Shrugs','Cable Lateral Raise'],
-  Biceps:    ['Barbell Curl','Dumbbell Curl','Hammer Curl','Incline Dumbbell Curl','Concentration Curl','Cable Curl','Preacher Curl','Spider Curl','Reverse Curl'],
-  Triceps:   ['Tricep Dip','Close Grip Bench Press','Skull Crusher','Tricep Pushdown','Overhead Tricep Extension','Cable Kickback','Diamond Push Up'],
-  Legs:      ['Squat','Front Squat','Leg Press','Romanian Deadlift','Leg Curl','Leg Extension','Bulgarian Split Squat','Lunges','Calf Raise','Hack Squat'],
-  Core:      ['Plank','Crunch','Sit Up','Leg Raise','Russian Twist','Cable Crunch','Ab Wheel Rollout','Hanging Leg Raise','Dragon Flag'],
-  Forearms:  ["Wrist Curl","Reverse Wrist Curl","Farmer's Walk","Plate Pinch","Hammer Curl","Wrist Roller","Dead Hang"],
-};
+// Exercise library (all 873 free-exercise-db exercises, grouped by muscle) and the
+// bodyweight (reps-only) subset live in constants/exerciseCatalog.ts
+export { EXERCISE_LIBRARY, BODYWEIGHT_EXERCISES } from './exerciseCatalog';
 
 export const FOOD_DB: Record<string, [number, number]> = {
   'Chicken Breast (100g)':   [31, 165],

@@ -1,5 +1,5 @@
 // app/index.tsx — Home Dashboard with Interactive Drag-and-Drop Widgets
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -39,7 +39,11 @@ import {
 } from '../db/database';
 import { Card, ProgressBar, Ring, MuscleTag, SectionHeader } from '../components/ui';
 import { useTheme } from '../contexts/ThemeContext';
+import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
+import { RemindersWidget, RemindersSheet } from '../components/Reminders';
+import { ExerciseLibrary } from '../components/ExerciseLibrary';
+import { turnOnReminders, notificationsAvailable, remindersEnabled, REMINDERS_UNAVAILABLE_MSG } from '../utils/reminders';
 
 export type HomeSectionKey = 'workout' | 'overview' | 'intake' | 'week_habits' | 'reminders';
 
@@ -77,6 +81,14 @@ export default function DashboardScreen() {
   // Edit / configure modal
   const [editModal, setEditModal] = useState(false);
 
+  // Reminders editor
+  const [remindersOpen, setRemindersOpen] = useState(false);
+  const [remindersKey, setRemindersKey] = useState(0);
+  const remindersOn = useMemo(() => remindersEnabled(), [remindersKey]);
+  const [flashReminders, setFlashReminders] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const listRef = useRef<any>(null);
+
   // Draggable section order
   const [sections, setSections] = useState<HomeSectionKey[]>(() => {
     try {
@@ -89,7 +101,7 @@ export default function DashboardScreen() {
           return [...valid, ...missing];
         }
       }
-    } catch (_) {}
+    } catch (e) { logError('homeLayout', e); }
     return DEFAULT_SECTIONS;
   });
 
@@ -105,6 +117,7 @@ export default function DashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
+      setRemindersKey(k => k + 1); // permission or reminders may have changed elsewhere
     }, [load])
   );
 
@@ -122,7 +135,7 @@ export default function DashboardScreen() {
     setSections(finalData);
     try {
       setSetting('home_sections_order', JSON.stringify(finalData));
-    } catch (_) {}
+    } catch (e) { logError('homeLayout', e); }
     try { Vibration.vibrate(22); } catch (_) {}
   };
 
@@ -130,7 +143,7 @@ export default function DashboardScreen() {
     setSections(DEFAULT_SECTIONS);
     try {
       setSetting('home_sections_order', JSON.stringify(DEFAULT_SECTIONS));
-    } catch (_) {}
+    } catch (e) { logError('homeLayout', e); }
     showAlert('Reset ✓', 'Home widgets layout restored to default.');
   };
 
@@ -140,7 +153,7 @@ export default function DashboardScreen() {
     const next = [...sections];
     [next[fromIdx], next[toIdx]] = [next[toIdx], next[fromIdx]];
     setSections(next);
-    try { setSetting('home_sections_order', JSON.stringify(next)); } catch (_) {}
+    try { setSetting('home_sections_order', JSON.stringify(next)); } catch (e) { logError('homeLayout', e); }
   };
 
   const openGoalsModal = () => {
@@ -189,7 +202,7 @@ export default function DashboardScreen() {
           router.push({ pathname: '/workouts', params: { openTab: 'Log' } } as any);
           break;
         case 'reminders':
-          router.push('/settings' as any);
+          setRemindersOpen(true);
           break;
       }
     }, 180);
@@ -199,9 +212,9 @@ export default function DashboardScreen() {
 
   if (!log || !goals) return null;
 
-  const waterPct = Math.min((log.water_intake || 0) / goals.water_goal, 1);
-  const proteinPct = Math.min((log.protein_intake || 0) / goals.protein_goal, 1);
-  const calPct = Math.min((log.calorie_intake || 0) / goals.calorie_goal, 1);
+  const waterPct = goals.water_goal > 0 ? Math.min((log.water_intake || 0) / goals.water_goal, 1) : 0;
+  const proteinPct = goals.protein_goal > 0 ? Math.min((log.protein_intake || 0) / goals.protein_goal, 1) : 0;
+  const calPct = goals.calorie_goal > 0 ? Math.min((log.calorie_intake || 0) / goals.calorie_goal, 1) : 0;
 
   const handleLogWeight = () => {
     const w = parseFloat(weightInput);
@@ -249,12 +262,6 @@ export default function DashboardScreen() {
     },
   ];
   const habitsDone = habits.filter(h => h.done).length;
-
-  const reminders: { icon: string; msg: string; color: string }[] = [];
-  if (!log.creatine_taken) reminders.push({ icon: 'flash-outline', msg: 'Take your creatine', color: C.orange });
-  if (waterPct < 1) reminders.push({ icon: 'water-outline', msg: `Water at ${Math.round(waterPct * 100)}% of goal`, color: C.water });
-  if (proteinPct < 1) reminders.push({ icon: 'restaurant-outline', msg: 'Hit your protein goal', color: C.protein });
-  if (!reminders.length) reminders.push({ icon: 'star-outline', msg: 'All goals done! Amazing work!', color: C.green });
 
   // ─────────────────────────────────────────────────────────────────────────
   // Section Renderers (100% of Original Content & Functionality Preserved)
@@ -506,21 +513,40 @@ export default function DashboardScreen() {
     </View>
   );
 
+  /** Header bell: bring the Reminders widget into view and briefly highlight it. */
+  const scrollToReminders = () => {
+    const index = sections.indexOf('reminders');
+    if (index < 0) return;
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 });
+    setFlashReminders(true);
+    setTimeout(() => setFlashReminders(false), 1400);
+  };
+
+  const handleTurnOnReminders = async () => {
+    if (!notificationsAvailable) { showAlert('Not available here', REMINDERS_UNAVAILABLE_MSG); return; }
+    const ok = await turnOnReminders();
+    if (!ok) showAlert('Notifications are off', 'Allow notifications for GainQuest in your phone settings to get reminders.');
+    setRemindersKey(k => k + 1);
+  };
+
   const renderRemindersSection = (isActive: boolean) => (
     <View style={styles.sectionWrap}>
       <View style={styles.sectionHeaderRow}>
         <SectionHeader title="Reminders" />
-        <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? C.orange : C.muted + '77'} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity onPress={() => setRemindersOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.reminderEditBtn} activeOpacity={0.8}>
+            <Ionicons name="options-outline" size={15} color={C.accent} />
+            <Text style={styles.reminderEditTxt}>Edit</Text>
+          </TouchableOpacity>
+          <View style={styles.dragGripBox}>
+            <Ionicons name="reorder-two" size={18} color={isActive ? C.orange : C.muted + '77'} />
+          </View>
         </View>
       </View>
-      <View style={styles.remindersGrid}>
-        {reminders.map((r, i) => (
-          <View key={i} style={[styles.reminderPill, { borderColor: r.color }]}>
-            <Ionicons name={r.icon as any} size={16} color={r.color} style={{ marginRight: 8 }} />
-            <Text style={[styles.reminderTxt, { color: r.color }]}>{r.msg}</Text>
-          </View>
-        ))}
+      <View style={[styles.reminderFlashWrap, flashReminders && { borderColor: C.accent }]}>
+        <RemindersWidget log={log} goals={goals} refreshKey={remindersKey}
+          onEdit={() => setRemindersOpen(true)} onTurnOn={handleTurnOnReminders} />
       </View>
     </View>
   );
@@ -578,19 +604,49 @@ export default function DashboardScreen() {
           </Text>
         </View>
 
-        {/* Edit / Configure Button */}
-        <TouchableOpacity
-          style={styles.editHeaderBtn}
-          onPress={() => setEditModal(true)}
-          activeOpacity={0.75}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="create-outline" size={18} color={C.accent} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {/* Exercise library */}
+          <TouchableOpacity
+            style={styles.editHeaderBtn}
+            onPress={() => setLibraryOpen(true)}
+            activeOpacity={0.75}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Exercise library"
+          >
+            <Ionicons name="barbell-outline" size={18} color={C.accent} />
+          </TouchableOpacity>
+
+          {/* Reminders bell — full colour when notifications are on, toned down when off */}
+          <TouchableOpacity
+            style={[styles.editHeaderBtn, !remindersOn && { opacity: 0.45 }]}
+            onPress={scrollToReminders}
+            activeOpacity={0.75}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name={remindersOn ? 'notifications' : 'notifications-outline'} size={18}
+              color={remindersOn ? C.accent : C.muted} />
+          </TouchableOpacity>
+
+          {/* Edit / Configure Button */}
+          <TouchableOpacity
+            style={styles.editHeaderBtn}
+            onPress={() => setEditModal(true)}
+            activeOpacity={0.75}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="create-outline" size={18} color={C.accent} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ── Interactive Draggable FlatList ── */}
       <DraggableFlatList
+        ref={listRef}
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          // Rows have varying heights; jump close, then retry precisely
+          listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: true });
+          setTimeout(() => listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 }), 250);
+        }}
         data={sections}
         extraData={sections}
         onDragEnd={handleDragEnd}
@@ -904,6 +960,13 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <RemindersSheet
+        visible={remindersOpen}
+        onClose={() => { setRemindersOpen(false); setRemindersKey(k => k + 1); }}
+      />
+
+      <ExerciseLibrary visible={libraryOpen} onClose={() => setLibraryOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -1403,22 +1466,9 @@ function makeStyles(C: any, isDark?: boolean) {
     habitProgressTxt: { fontSize: 10, color: C.muted, marginBottom: 6, fontWeight: '600' },
 
     // Reminders
-    remindersGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 16 },
-    reminderPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: C.bg,
-      borderWidth: 1,
-      borderRadius: 20,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      shadowColor: isDark ? '#000000' : '#BFC8D6',
-      shadowOffset: { width: 2, height: 2 },
-      shadowOpacity: 0.5,
-      shadowRadius: 6,
-      elevation: 2,
-    },
-    reminderTxt: { fontSize: 12, fontWeight: '700' },
+    reminderEditBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: C.accent + '14', borderWidth: 1, borderColor: C.accent + '40' },
+    reminderEditTxt: { fontSize: 12, fontWeight: '800', color: C.accent },
+    reminderFlashWrap: { borderRadius: 22, borderWidth: 1.5, borderColor: 'transparent', marginBottom: 16 },
 
     // Body Weight Popup
     bwOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
