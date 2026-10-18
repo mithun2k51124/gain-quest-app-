@@ -181,12 +181,44 @@ export const LOADS: Record<string, [LoadType, number]> = {
   'Ab Crunch Machine': ['stack', 0.3],
 };
 
+/** from, from + step, ... up to `to` */
+const ladder = (from: number, to: number, step: number) =>
+  Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => from + i * step);
+
 // Weights that exist for implements that only come in fixed sizes
-/** Dumbbells found in most gyms: 2 and 2.5 kg, then 2.5 kg steps to 25, then 5 kg steps. */
-export const DUMBBELL_SIZES = [2, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 30, 35, 40, 45, 50];
+/** Dumbbells: 2 and 2.5 kg, then 2.5 kg steps (5, 7.5, 10, 12.5 ...). */
+export const DUMBBELL_SIZES = [2, ...ladder(2.5, 60, 2.5)];
 export const KETTLEBELL_SIZES = [4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32];
-export const PLATE_SIZES = [1.25, 2.5, 5, 10, 15, 20];
+export const PLATE_SIZES = [1.25, 2.5, 5, 10, 15, 20, 25];
 export const MEDBALL_SIZES = [2, 3, 4, 5, 6, 8, 10];
 export const BAR_KG = 20;
 export const EZ_BAR_KG = 10;
 export const SMITH_MIN_KG = 15;
+/** Machine weight stacks and plate-loaded machines move in 5 kg steps. */
+export const MACHINE_STEP_KG = 5;
+
+/** Every weight that can be picked for an implement: what the Log tab's weight wheel offers. */
+export function weightLadder(type: LoadType | 'free'): number[] {
+  switch (type) {
+    case 'db': case 'db1': return DUMBBELL_SIZES;
+    case 'kb': case 'kb2': return KETTLEBELL_SIZES;
+    case 'stack': case 'sled': return ladder(5, 300, MACHINE_STEP_KG);
+    // Bars are loaded with plates, so they move in 2.5 kg steps
+    case 'barbell': case 'ez': case 'smith': return ladder(2.5, 300, 2.5);
+    case 'plate': return PLATE_SIZES;
+    case 'medball': return MEDBALL_SIZES;
+    case 'added': return ladder(0, 100, 2.5);
+    default: return ladder(0, 300, 2.5);
+  }
+}
+
+/** The ladder weight closest to kg (the lighter one on a tie). */
+export function closestOnLadder(kg: number, steps: number[]): number {
+  return steps.reduce((best, s) => (Math.abs(s - kg) < Math.abs(best - kg) ? s : best), steps[0]);
+}
+
+/** One step heavier or lighter on the ladder (stays put at either end). */
+export function stepFrom(kg: number, steps: number[], dir: 1 | -1): number {
+  const i = steps.indexOf(closestOnLadder(kg, steps));
+  return steps[Math.max(0, Math.min(steps.length - 1, i + dir))];
+}

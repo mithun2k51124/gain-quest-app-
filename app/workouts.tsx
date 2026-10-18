@@ -28,6 +28,7 @@ import {
   getWorkoutSessions,
   checkPRForLog,
   isRepsOnly,
+  getLastWeight,
   updateDailyLog,
   updateStreak,
   todayStr,
@@ -40,7 +41,11 @@ import { Card, Btn, MuscleTag, SectionHeader, EmptyState } from '../components/u
 import BodyAnatomy from '../components/BodyAnatomy';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 import { findExercise } from '../constants/exerciseCatalog';
-import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence } from '../components/SplitWizard';
+import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
+import { WheelPicker } from '../components/WheelPicker';
+import { weightStepsFor } from '../constants/equipment';
+import { closestOnLadder, stepFrom } from '../constants/startingLoads';
+import { getLoadFeedback, saveLoadFeedback, Vote } from '../utils/loadFeedback';
 import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -506,6 +511,27 @@ function MuscleGroupAccordion({
 // ─────────────────────────────────────────────────────────────────────────────
 // Exercise Log Card (Log tab)
 // ─────────────────────────────────────────────────────────────────────────────
+const SET_ITEMS = Array.from({ length: 10 }, (_, i) => String(i + 1));
+const REP_ITEMS = Array.from({ length: 100 }, (_, i) => String(i + 1));
+
+function FeedbackOption({ icon, color, title, sub, primary, onPress }: {
+  icon: keyof typeof Ionicons.glyphMap; color: string; title: string; sub: string; primary?: boolean; onPress: () => void;
+}) {
+  const { C } = useTheme();
+  const styles = makeStyles(C);
+  return (
+    <TouchableOpacity style={[styles.fbOption, primary && { borderColor: color, backgroundColor: color + '14' }]}
+      onPress={onPress} activeOpacity={0.85}>
+      <Ionicons name={icon} size={20} color={color} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.fbOptionTitle}>{title}</Text>
+        <Text style={styles.fbOptionSub}>{sub}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={C.muted} />
+    </TouchableOpacity>
+  );
+}
+
 function ExerciseLogCard({
   ex,
   onLog,
@@ -519,29 +545,39 @@ function ExerciseLogCard({
 }) {
   const { C } = useTheme();
   const styles = makeStyles(C);
-  const { showAlert } = useCustomAlert();
-  // What the split builder set for this exercise today, shown as the goal
-  const [target] = useState(() => targetFor(getSplitConfig(), ex.day_of_week, ex.exercise_name));
+  const name = ex.exercise_name;
   // Bodyweight moves (push-ups, pull-ups, dips, band work...) are logged as reps only
-  const [repsOnly] = useState(() => isRepsOnly(ex.exercise_name));
-  const [sets, setSets] = useState('1');
+  const [repsOnly] = useState(() => isRepsOnly(name));
+  // The weights this exercise can actually be done with (dumbbell sizes, 5 kg machine steps...)
+  const [steps] = useState(() => weightStepsFor(name));
+  const [feedback, setFeedback] = useState(() => getLoadFeedback(name));
+  // What the split builder set for this exercise today, shown as the goal. A 👍 / 👎 from an
+  // earlier session moves the weight to the one picked then.
+  const [target] = useState(() => {
+    const t = targetFor(getSplitConfig(), ex.day_of_week, name);
+    const fb = getLoadFeedback(name);
+    return t && t.kg !== undefined && fb && fb.date < todayStr() ? withKg(t, fb.kg) : t;
+  });
+  const [sets, setSets] = useState(1);
   // Start the reps at the bottom of the target range ('8–12' → 8); timed holds keep the default
-  const [reps, setReps] = useState(() => target?.reps.match(/^(\d+)(?:–\d+)?$/)?.[1] ?? '8');
-  // The plan's starting weight is filled in, ready to log or change
-  const [weight, setWeight] = useState(() => (!repsOnly && target?.kg !== undefined ? String(target.kg) : ''));
+  const [reps, setReps] = useState(() => Number(target?.reps.match(/^(\d+)(?:–\d+)?$/)?.[1] ?? 8));
+  // The recommended weight is on the wheel, ready to log or scroll to change: the latest feedback,
+  // else the plan, else what was logged last time
+  const [kg, setKg] = useState(() =>
+    closestOnLadder(getLoadFeedback(name)?.kg ?? target?.kg ?? getLastWeight(name) ?? 20, steps));
+  const [vote, setVote] = useState<Vote | null>(null);  // the pop-up being shown
 
-  const [setsModal, setSetsModal] = useState(false);
-  const [repsModal, setRepsModal] = useState(false);
+  const handleLog = () => onLog(sets, reps, repsOnly ? 0 : kg);
 
-  const handleLog = () => {
-    const w = repsOnly ? 0 : parseFloat(weight);
-    if (isNaN(w)) {
-      showAlert('Weight', 'Enter a valid weight.');
-      return;
-    }
-    const s = parseInt(sets, 10);
-    const r = parseInt(reps, 10);
-    onLog(s, r, w);
+  // Feedback is about the heaviest weight used today
+  const usedKg = loggedSets.reduce((m, s) => Math.max(m, s.weight), 0) || kg;
+  const lighter = stepFrom(usedKg, steps, -1);
+  const heavier = stepFrom(usedKg, steps, 1);
+  const votedToday = feedback && feedback.date === todayStr() ? feedback.vote : null;
+  const choose = (v: Vote, nextKg: number) => {
+    setFeedback(saveLoadFeedback(name, v, nextKg));
+    setKg(nextKg);  // any sets still to do use it too
+    setVote(null);
   };
   const muscleColor = C.mg[ex.muscle_group] || C.accent;
   // Goal stats: weight shows the number with what it means ('10 kg' · 'in each hand')
@@ -594,6 +630,21 @@ function ExerciseLogCard({
 
         {loggedSets.length > 0 && (
           <View style={{ marginBottom: 16 }}>
+            {!repsOnly && (
+              <View style={styles.rateRow}>
+                <Text style={styles.rateLabel}>How did it go?</Text>
+                <TouchableOpacity
+                  style={[styles.rateBtn, votedToday === 'up' && { backgroundColor: C.green + '22', borderColor: C.green }]}
+                  onPress={() => setVote('up')} hitSlop={6} activeOpacity={0.8}>
+                  <Ionicons name={votedToday === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} size={18} color={C.green} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.rateBtn, votedToday === 'down' && { backgroundColor: C.red + '22', borderColor: C.red }]}
+                  onPress={() => setVote('down')} hitSlop={6} activeOpacity={0.8}>
+                  <Ionicons name={votedToday === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} size={18} color={C.red} />
+                </TouchableOpacity>
+              </View>
+            )}
             {loggedSets.map((s, i) => (
               <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: muscleColor, marginRight: 8 }} />
@@ -606,26 +657,21 @@ function ExerciseLogCard({
           </View>
         )}
 
-        <View style={styles.setsRow}>
-          <TouchableOpacity style={styles.setsBox} onPress={() => setSetsModal(true)}>
+        {/* Scroll wheels, set to the recommendation */}
+        <View style={styles.wheelCard}>
+          <View style={styles.wheelCol}>
             <Text style={styles.setsLabel}>Sets</Text>
-            <Text style={styles.setsVal}>{sets}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.setsBox} onPress={() => setRepsModal(true)}>
+            <WheelPicker items={SET_ITEMS} width={48} index={sets - 1} onChange={i => setSets(i + 1)} />
+          </View>
+          <View style={styles.wheelCol}>
             <Text style={styles.setsLabel}>Reps</Text>
-            <Text style={styles.setsVal}>{reps}</Text>
-          </TouchableOpacity>
+            <WheelPicker items={REP_ITEMS} width={56} index={reps - 1} onChange={i => setReps(i + 1)} />
+          </View>
           {!repsOnly && (
-            <View style={[styles.setsBox, { flex: 2 }]}>
+            <View style={[styles.wheelCol, { flex: 1.3 }]}>
               <Text style={styles.setsLabel}>Weight (kg)</Text>
-              <TextInput
-                style={styles.setsInput}
-                keyboardType="decimal-pad"
-                value={weight}
-                onChangeText={setWeight}
-                placeholder="60"
-                placeholderTextColor={C.muted}
-              />
+              <WheelPicker items={steps.map(String)} width={72} index={Math.max(0, steps.indexOf(kg))}
+                onChange={i => setKg(steps[i])} />
             </View>
           )}
         </View>
@@ -635,17 +681,39 @@ function ExerciseLogCard({
         </View>
       </View>
 
-      <NeuModal visible={setsModal} title="Sets" onClose={() => setSetsModal(false)}>
-        <FlatOptions
-          options={['1','2','3','4','5'].map(v => ({ label: v, value: v }))}
-          onSelect={v => { setSets(v); setSetsModal(false); }}
-        />
-      </NeuModal>
-      <NeuModal visible={repsModal} title="Reps" onClose={() => setRepsModal(false)}>
-        <FlatOptions
-          options={['1','2','3','4','5','6','8','10','12','15','20'].map(v => ({ label: v, value: v }))}
-          onSelect={v => { setReps(v); setRepsModal(false); }}
-        />
+      {/* 👍 / 👎 → the weight for next time */}
+      <NeuModal visible={vote !== null} title={vote === 'up' ? 'Great lift!' : 'Too heavy today?'} onClose={() => setVote(null)}>
+        <View style={[styles.fbIcon, { backgroundColor: (vote === 'up' ? C.green : C.red) + '1F' }]}>
+          <Ionicons name={vote === 'up' ? 'thumbs-up' : 'thumbs-down'} size={30} color={vote === 'up' ? C.green : C.red} />
+        </View>
+        <Text style={styles.fbText}>
+          {vote === 'up'
+            ? `You did your sets at ${usedKg} kg. What should next session start at?`
+            : `No problem, that's part of training. Drop the weight and keep good form.`}
+        </Text>
+        {vote === 'up' ? (
+          <>
+            {heavier !== usedKg && (
+              <FeedbackOption icon="trending-up" color={C.green} primary
+                title={`Go up to ${heavier} kg`} sub="It felt good. Add a little weight next time."
+                onPress={() => choose('up', heavier)} />
+            )}
+            <FeedbackOption icon="remove" color={C.accent}
+              title={`Stay at ${usedKg} kg`} sub="Repeat it and aim for more reps."
+              onPress={() => choose('up', usedKg)} />
+          </>
+        ) : (
+          <>
+            {lighter !== usedKg && (
+              <FeedbackOption icon="trending-down" color={C.red} primary
+                title={`Lower to ${lighter} kg`} sub="Used for the rest of today's sets and next session."
+                onPress={() => choose('down', lighter)} />
+            )}
+            <FeedbackOption icon="refresh" color={C.accent}
+              title={`Keep ${usedKg} kg`} sub="Try the same weight again next time."
+              onPress={() => choose('down', usedKg)} />
+          </>
+        )}
       </NeuModal>
     </Card>
   );
@@ -1615,6 +1683,25 @@ function makeStyles(C: any) { return StyleSheet.create({
   goalValue: { fontSize: 17, fontWeight: '800', color: C.text },
   goalLabel: { fontSize: 10, fontWeight: '700', color: C.muted, marginTop: 2, textAlign: 'center' },
   goalSentence: { fontSize: 12, fontWeight: '600', color: C.textSub, marginTop: 10, lineHeight: 17 },
+  wheelCard: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
+    backgroundColor: C.bg, borderRadius: 16, borderWidth: 1, borderColor: C.border,
+  },
+  wheelCol: { flex: 1, alignItems: 'center' },
+  rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  rateLabel: { flex: 1, fontSize: 12, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  rateBtn: {
+    width: 38, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.bg, borderWidth: 1, borderColor: C.border,
+  },
+  fbIcon: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
+  fbText: { fontSize: 14, color: C.textSub, textAlign: 'center', lineHeight: 20, marginBottom: 16, paddingHorizontal: 8 },
+  fbOption: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 10,
+    backgroundColor: C.bg, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+  },
+  fbOptionTitle: { fontSize: 15, fontWeight: '800', color: C.text },
+  fbOptionSub: { fontSize: 12, color: C.muted, marginTop: 2 },
   exRow: {
     flexDirection: 'row',
     alignItems: 'center',

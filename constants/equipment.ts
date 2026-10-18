@@ -3,7 +3,7 @@
 // 'none' = no equipment; floor, wall, chair, stairs, a towel and the like are assumed.
 // Each entry was checked against the exercise's own instructions, not just the dataset label.
 import REQUIRES from './exerciseEquipment.json';
-import { LOADS } from './startingLoads';
+import { LOADS, LoadType, weightLadder } from './startingLoads';
 
 export type EquipmentId =
   | 'dumbbells' | 'barbell' | 'kettlebell' | 'kettlebell_pair' | 'bench' | 'adj_bench' | 'rack'
@@ -108,6 +108,25 @@ export function isBodyweightExercise(name: string): boolean {
   if (load) return load[0] === 'bw';
   const req = REQ[name];
   return !!req && req.every(i => NO_WEIGHT.has(i));
+}
+
+/** What an exercise is loaded with, from the starting-weight table, its equipment, or its name. */
+function loadTypeOf(name: string): LoadType | 'free' {
+  const load = LOADS[name];
+  if (load) return load[0];
+  const req = REQ[name] ?? [];
+  const has = (re: RegExp) => re.test(name);
+  if (req.includes('dumbbells') || has(/dumbbell|\bdb\b/i)) return 'db';
+  if (req.includes('kettlebell') || has(/kettlebell/i)) return 'kb';
+  if (req.includes('cable') || req.includes('machines') || has(/cable|machine|pulldown|pushdown|leg press|leg curl|leg extension|pec deck/i)) return 'stack';
+  if (req.some(i => i === 'barbell' || i === 'ez_bar' || i === 'smith') || has(/barbell|ez.?bar|smith/i)) return 'barbell';
+  if (req.includes('med_ball')) return 'medball';
+  return 'free';
+}
+
+/** The weights the Log tab offers for an exercise: dumbbell sizes, 5 kg machine steps, 2.5 kg bar steps... */
+export function weightStepsFor(name: string): number[] {
+  return weightLadder(loadTypeOf(name));
 }
 
 /** How many library exercises fit this equipment (partner exercises left out). */

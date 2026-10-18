@@ -24,7 +24,7 @@ import {
   Candidate, Level, PatternKey, SkillKey, PATTERNS, POOLS, SKILL_ORDER,
 } from '../constants/exercisePools';
 import {
-  LOADS, DUMBBELL_SIZES, KETTLEBELL_SIZES, PLATE_SIZES, MEDBALL_SIZES, BAR_KG, EZ_BAR_KG, SMITH_MIN_KG,
+  LOADS, DUMBBELL_SIZES, KETTLEBELL_SIZES, PLATE_SIZES, MEDBALL_SIZES, BAR_KG, EZ_BAR_KG, SMITH_MIN_KG, MACHINE_STEP_KG,
 } from '../constants/startingLoads';
 
 export type { Level };
@@ -428,7 +428,7 @@ function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: stri
     case 'smith':
       return out(Math.max(SMITH_MIN_KG, roundTo(target, 2.5)));
     case 'stack':
-      return out(Math.max(2.5, roundTo(target, 2.5)));
+      return out(Math.max(MACHINE_STEP_KG, roundTo(target, MACHINE_STEP_KG)));
     case 'sled':
       return out(Math.max(10, roundTo(target, 5)));
     case 'plate': {

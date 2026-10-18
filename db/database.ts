@@ -784,6 +784,15 @@ export function getPRProgressionHistory(exerciseName: string): PRProgressionEntr
   });
 }
 
+/** The most recent weight logged for an exercise, if it was ever logged with one. */
+export function getLastWeight(exerciseName: string): number | null {
+  const r = getDb().getFirstSync<{ weight: number }>(
+    'SELECT weight FROM exercise_logs WHERE exercise_name=? AND weight>0 ORDER BY session_date DESC, id DESC LIMIT 1',
+    [exerciseName]
+  );
+  return r ? r.weight : null;
+}
+
 export function getAllExerciseNames(): string[] {
   return getDb()
     .getAllSync<{ exercise_name: string }>('SELECT DISTINCT exercise_name FROM exercise_logs ORDER BY exercise_name')

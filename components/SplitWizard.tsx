@@ -53,6 +53,11 @@ export function targetFor(cfg: SplitConfig | null, day: string, exercise: string
   return m ? { sets: Number(m[1]), reps: m[2] } : null;
 }
 
+/** The same target at a different weight ('10 kg each' → '7.5 kg each'), e.g. after a 👎. */
+export function withKg(t: ExerciseTarget, kg: number): ExerciseTarget {
+  return { ...t, kg, load: t.load?.replace(/[\d.]+ kg/, `${kg} kg`) ?? `${kg} kg` };
+}
+
 /** Timed targets ('30–60 s', '20–40 s each side') are holds, not reps. */
 const isTimed = (reps: string) => /\d s\b/.test(reps);
 
