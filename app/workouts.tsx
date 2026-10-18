@@ -46,6 +46,7 @@ import { findExercise } from '../constants/exerciseCatalog';
 import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
 import { WheelPicker } from '../components/WheelPicker';
 import { SettingsButton } from '../components/SettingsButton';
+import { SetSession } from '../components/SetSession';
 import { WorkoutCalendar, longDate } from '../components/WorkoutCalendar';
 import { weightStepsFor } from '../constants/equipment';
 import { closestOnLadder, stepsAway } from '../constants/startingLoads';
@@ -675,8 +676,10 @@ function ExerciseLogCard({
     closestOnLadder(getLoadFeedback(name)?.kg ?? target?.kg ?? getLastWeight(name) ?? 20, steps));
   const [vote, setVote] = useState<Vote | null>(null);  // the pop-up being shown
 
-  const handleLog = () => {
-    onLog(1, reps, repsOnly ? 0 : kg);
+  // Start exercise opens the full-screen set page; it logs each set as it's finished
+  const [sessionOpen, setSessionOpen] = useState(false);
+  const logFromSession = (r: number, w: number) => {
+    onLog(1, r, w);
     setExtraSet(false);
   };
 
@@ -789,9 +792,10 @@ function ExerciseLogCard({
 
         <View style={{ marginTop: 14, flexDirection: 'row', gap: 10 }}>
           {!allDone && (
-            <View style={{ flex: 1 }}>
-              <Btn label={`Log set ${doneSets + 1}`} color={muscleColor} onPress={handleLog} small />
-            </View>
+            <TouchableOpacity style={[styles.startExBtn, { backgroundColor: muscleColor }]} onPress={() => setSessionOpen(true)} activeOpacity={0.85}>
+              <Ionicons name="play" size={16} color="#fff" />
+              <Text style={styles.startExTxt}>{doneSets === 0 ? 'Start exercise' : `Start set ${doneSets + 1}`}</Text>
+            </TouchableOpacity>
           )}
           {/* Once the goal is met (or with no goal), another set can always be added */}
           {doneSets > 0 && !extraSet && (allDone || goalSets === undefined) && (
@@ -830,6 +834,21 @@ function ExerciseLogCard({
           </View>
         )}
       </View>
+
+      <SetSession
+        visible={sessionOpen}
+        name={name}
+        color={muscleColor}
+        doneSets={doneSets}
+        goalSets={goalSets}
+        reps={reps}
+        kg={kg}
+        repsOnly={repsOnly}
+        steps={steps}
+        onLog={logFromSession}
+        onChange={(r, w) => { setReps(r); if (!repsOnly) setKg(w); }}
+        onClose={() => setSessionOpen(false)}
+      />
 
       {/* Felt strong / too heavy → how much to change the weight */}
       <NeuModal visible={vote !== null} title={vote === 'up' ? 'Nice lift!' : 'Too heavy today?'} onClose={() => setVote(null)}>
@@ -1027,6 +1046,7 @@ export default function WorkoutsScreen() {
               load();
             }}
             onPlanReplaced={load}
+            onStartWorkout={() => setTab('Log')}
           />
         )}
 
@@ -1486,6 +1506,7 @@ function PlannerTab({
   onAddExercise,
   onDeleteExercise,
   onPlanReplaced,
+  onStartWorkout,
 }: {
   plans: WorkoutPlan[];
   planExercises: WorkoutPlanExercise[];
@@ -1494,6 +1515,7 @@ function PlannerTab({
   onAddExercise: (day: string, exercise: string, muscle: string) => void;
   onDeleteExercise: (id: number) => void;
   onPlanReplaced: () => void;
+  onStartWorkout: () => void;
 }) {
   const { C } = useTheme();
   const styles = makeStyles(C);
@@ -1578,6 +1600,14 @@ function PlannerTab({
                 <View key={mg} style={[ps.dot, { backgroundColor: C.mg[mg] || C.accent }]} />
               ))}
             </View>
+          )}
+          {/* Today's workout: straight to the Log tab */}
+          {isToday && !isRest && exercisesForDay.length > 0 && (
+            <TouchableOpacity style={ps.startBtn} onPress={onStartWorkout} activeOpacity={0.85}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="play" size={13} color="#fff" />
+              <Text style={ps.startTxt}>Start</Text>
+            </TouchableOpacity>
           )}
           <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={isToday ? C.accent : C.muted} />
         </TouchableOpacity>
@@ -1714,6 +1744,8 @@ function makePlannerStyles(C: any) {
     dot:       { width: 8, height: 8, borderRadius: 4 },
     body:      { paddingHorizontal: 16, paddingBottom: 16, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
     dose:      { fontSize: 12, fontWeight: '700', color: C.accent, marginTop: 2 },
+    startBtn:  { flexDirection: 'row', alignItems: 'center', gap: 4, marginHorizontal: 10, backgroundColor: C.accent, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12 },
+    startTxt:  { fontSize: 12, fontWeight: '800', color: '#fff' },
   });
 }
 
@@ -1980,6 +2012,8 @@ function makeStyles(C: any) { return StyleSheet.create({
     color: C.accent,
   },
   // PR overlay
+  startExBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 14 },
+  startExTxt: { fontSize: 15, fontWeight: '900', color: '#fff' },
   // History: the selected day's workout
   histKicker: { fontSize: 11, fontWeight: '800', color: C.accent, letterSpacing: 1 },
   histTitle: { fontSize: 18, fontWeight: '800', color: C.text, marginTop: 2 },

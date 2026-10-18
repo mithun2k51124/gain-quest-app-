@@ -68,6 +68,7 @@ export const DRAG_LIST_PROPS = {
 } as const;
 
 const styles = StyleSheet.create({
-  wrap: { marginBottom: 16, borderRadius: 22, shadowOffset: { width: 0, height: 10 } },
+  // Cards inside already carry 14 below them; this just adds a little breathing room
+  wrap: { marginBottom: 6, borderRadius: 22, shadowOffset: { width: 0, height: 10 } },
   glow: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 22, borderWidth: 1.5 },
 });

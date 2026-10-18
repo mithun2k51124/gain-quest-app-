@@ -29,6 +29,9 @@ import {
   getWeeklyStats,
   getSetting,
   setSetting,
+  getWorkoutPlanExercises,
+  getExercisesForDate,
+  todayStr,
   DailyLog,
   Goals,
   Streak,
@@ -42,6 +45,7 @@ import { useCustomAlert } from '../contexts/AlertContext';
 import { RemindersWidget, RemindersSheet } from '../components/Reminders';
 import { ExerciseLibrary } from '../components/ExerciseLibrary';
 import { ExerciseGuideModal } from '../components/ExerciseGuide';
+import { getSplitConfig, targetFor } from '../components/SplitWizard';
 import { DragWidget, DRAG_LIST_PROPS } from '../components/DragWidget';
 import { EXERCISE_CATALOG, findExercise } from '../constants/exerciseCatalog';
 import { turnOnReminders, notificationsAvailable, remindersEnabled, REMINDERS_UNAVAILABLE_MSG } from '../utils/reminders';
@@ -65,6 +69,22 @@ const FEATURED = [
   'Triceps Pushdown', 'Goblet Squat', 'Dumbbell Lunges', 'Face Pull', 'Hanging Leg Raise',
   'Seated Cable Rows', 'Side Lateral Raise', 'Barbell Hip Thrust', 'Wide-Grip Lat Pulldown',
 ].map(n => findExercise(n)).filter((e): e is NonNullable<typeof e> => !!e);
+/**
+ * Today's planned exercises and how many are finished: every target set logged (one set
+ * when the exercise has no split target).
+ */
+function todaysWorkoutProgress(): { done: number; total: number } {
+  const day = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const planned = getWorkoutPlanExercises(day);
+  const logged = getExercisesForDate(todayStr());
+  const cfg = getSplitConfig();
+  const setsOf = (name: string) =>
+    logged.filter(l => l.exercise_name === name).reduce((n, l) => n + (l.sets || 1), 0);
+  const names = [...new Set(planned.map(p => p.exercise_name))];
+  const done = names.filter(n => setsOf(n) >= (targetFor(cfg, day, n)?.sets ?? 1)).length;
+  return { done, total: names.length };
+}
+
 function todaysPicks() {
   const day = Math.floor(Date.now() / 86400000);
   return [0, 1, 2].map(i => FEATURED[(day * 3 + i) % FEATURED.length]);
@@ -102,6 +122,7 @@ export default function DashboardScreen() {
   const remindersOn = useMemo(() => remindersEnabled(), [remindersKey]);
   const [flashReminders, setFlashReminders] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [workoutProgress, setWorkoutProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [guideFor, setGuideFor] = useState<string | null>(null);
   const picks = useMemo(todaysPicks, []);
   const listRef = useRef<any>(null);
@@ -123,6 +144,7 @@ export default function DashboardScreen() {
   });
 
   const load = useCallback(() => {
+    setWorkoutProgress(todaysWorkoutProgress());
     setLog(getTodayLog());
     setGoals(getGoals());
     setStreak(getStreak());
@@ -249,12 +271,22 @@ export default function DashboardScreen() {
     showAlert('Weight Logged ✓', `Body weight ${w} kg saved!`);
   };
 
+  // Done = every exercise planned for today finished; with nothing planned, any logged workout
+  const workoutDone = workoutProgress.total > 0
+    ? workoutProgress.done === workoutProgress.total
+    : !!log.workout_completed;
+  const workoutStatus = workoutDone ? '✓ Done'
+    : workoutProgress.done > 0 ? `${workoutProgress.done}/${workoutProgress.total} done`
+    : 'Tap to Log';
+
   const habits = [
     {
       icon: 'barbell-outline',
       label: 'Workout',
-      done: !!log.workout_completed,
-      info: 'Auto-tracked when you log a workout session in the Workouts tab.',
+      done: workoutDone,
+      info: workoutProgress.total > 0
+        ? `Done when every exercise planned for today is finished (all its sets logged). ${workoutProgress.done} of ${workoutProgress.total} finished so far.`
+        : 'Auto-tracked when you log a workout session in the Workouts tab.',
     },
     {
       icon: 'water-outline',
@@ -314,17 +346,17 @@ export default function DashboardScreen() {
                   onPress={() => router.push({ pathname: '/workouts', params: { openTab: 'Log' } } as any)}
                   style={[
                     styles.statusBadge,
-                    { backgroundColor: log.workout_completed ? C.greenDim : C.accentDim },
+                    { backgroundColor: workoutDone ? C.greenDim : C.accentDim },
                   ]}
                 >
                   <Text
                     style={{
-                      color: log.workout_completed ? C.green : C.muted,
+                      color: workoutDone ? C.green : C.muted,
                       fontWeight: '700',
                       fontSize: 11,
                     }}
                   >
-                    {log.workout_completed ? '✓ Done' : 'Tap to Log'}
+                    {workoutStatus}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -397,9 +429,9 @@ export default function DashboardScreen() {
         <OverviewCard
           icon="barbell-outline"
           title="Workout"
-          val={log.workout_completed ? 'Done' : 'Pending'}
-          sub={log.workout_completed ? 'Tap to log more' : 'Tap to log'}
-          color={log.workout_completed ? C.purple : C.muted}
+          val={workoutDone ? 'Done' : workoutProgress.done > 0 ? `${workoutProgress.done}/${workoutProgress.total} done` : 'Pending'}
+          sub={workoutDone ? 'Tap to log more' : 'Tap to log'}
+          color={workoutDone ? C.purple : workoutProgress.done > 0 ? C.orange : C.muted}
           onPress={() => router.push({ pathname: '/workouts', params: { openTab: 'Log' } })}
         />
         <OverviewCard
@@ -1031,7 +1063,7 @@ function OverviewCard({ icon, title, val, sub, color, onPress }: any) {
   const Wrapper = onPress ? TouchableOpacity : View;
   return (
     <Wrapper style={styles.ovCardWrap} onPress={onPress} activeOpacity={0.82}>
-      <Card accent={color}>
+      <Card accent={color} style={{ marginBottom: 0 }}>
         <View style={styles.ovCard}>
           <View style={[styles.ovIconBox, { backgroundColor: color + '15' }]}>
             <Ionicons name={icon} size={20} color={color} />
@@ -1520,7 +1552,7 @@ function makeStyles(C: any, isDark?: boolean) {
 
     // Overview
     overviewGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-    ovCardWrap: { width: '48%', marginBottom: 16 },
+    ovCardWrap: { width: '48.5%', marginBottom: 10 },
     ovCard: { padding: 14, alignItems: 'center', width: '100%' },
     ovIconBox: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
     ovTitle: { fontSize: 11, color: C.muted, fontWeight: '700', marginBottom: 6, textAlign: 'center' },
