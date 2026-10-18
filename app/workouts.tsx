@@ -45,6 +45,7 @@ import { ExerciseGuideButton } from '../components/ExerciseGuide';
 import { findExercise } from '../constants/exerciseCatalog';
 import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
 import { WheelPicker } from '../components/WheelPicker';
+import { SettingsButton } from '../components/SettingsButton';
 import { WorkoutCalendar, longDate } from '../components/WorkoutCalendar';
 import { weightStepsFor } from '../constants/equipment';
 import { closestOnLadder, stepsAway } from '../constants/startingLoads';
@@ -984,8 +985,9 @@ export default function WorkoutsScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
+      <View style={[styles.header, styles.headerRow]}>
         <Text style={styles.headerTitle}>Workouts</Text>
+        <SettingsButton />
       </View>
 
       <View style={styles.tabBar}>
@@ -1727,6 +1729,7 @@ function makeStyles(C: any) { return StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
   tabBar: {
     flexDirection: 'row',

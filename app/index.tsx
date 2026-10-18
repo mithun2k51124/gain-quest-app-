@@ -38,6 +38,7 @@ import {
   WorkoutPlan,
 } from '../db/database';
 import { Card, ProgressBar, Ring, MuscleTag, SectionHeader } from '../components/ui';
+import { SettingsButton } from '../components/SettingsButton';
 import { useTheme } from '../contexts/ThemeContext';
 import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -636,6 +637,8 @@ export default function DashboardScreen() {
           >
             <Ionicons name="create-outline" size={18} color={C.accent} />
           </TouchableOpacity>
+
+          <SettingsButton />
         </View>
       </View>
 

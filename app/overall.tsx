@@ -28,6 +28,7 @@ import {
   todayStr,
 } from '../db/database';
 import { SectionHeader } from '../components/ui';
+import { SettingsButton } from '../components/SettingsButton';
 import { useTheme } from '../contexts/ThemeContext';
 import { logError } from '../utils/logError';
 
@@ -585,11 +586,14 @@ export default function OverallScreen() {
           <Text style={styles.headerTitle}>Today's Activities</Text>
           <Text style={styles.headerSubtitle}>{todayFormatted}</Text>
         </View>
-        <View style={styles.scorePill}>
-          <View style={[styles.scoreDot, { backgroundColor: score >= 70 ? '#4ADE80' : score >= 40 ? '#FBBF24' : '#EF4444' }]} />
-          <Text style={[styles.scorePillTxt, { color: score >= 70 ? '#4ADE80' : score >= 40 ? '#FBBF24' : '#EF4444' }]}>
-            {score}%
-          </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={styles.scorePill}>
+            <View style={[styles.scoreDot, { backgroundColor: score >= 70 ? '#4ADE80' : score >= 40 ? '#FBBF24' : '#EF4444' }]} />
+            <Text style={[styles.scorePillTxt, { color: score >= 70 ? '#4ADE80' : score >= 40 ? '#FBBF24' : '#EF4444' }]}>
+              {score}%
+            </Text>
+          </View>
+          <SettingsButton />
         </View>
       </View>
 

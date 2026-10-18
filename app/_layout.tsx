@@ -21,7 +21,6 @@ const TAB_ROUTES = [
   '/workouts',
   '/prs',
   '/analytics',
-  '/settings',
 ];
 
 
@@ -32,8 +31,7 @@ const getTabIndex = (path: string): number => {
   if (path.startsWith('/workouts')) return 3;
   if (path.startsWith('/prs')) return 4;
   if (path.startsWith('/analytics')) return 5;
-  if (path.startsWith('/settings')) return 6;
-  return -1;
+  return -1;  // Settings isn't a tab: no swiping from it
 };
 
 // Tab definitions — single source of truth
@@ -44,7 +42,6 @@ const TAB_DEFS = [
   { name: 'workouts',  label: 'Workouts',  icon: 'barbell-outline' as const },
   { name: 'prs',       label: 'PRs',       icon: 'trophy-outline' as const },
   { name: 'analytics', label: 'Analytics', icon: 'stats-chart-outline' as const },
-  { name: 'settings',  label: 'Settings',  icon: 'settings-outline' as const },
 ];
 
 // Custom tab button: full-width colored indicator line + spring press animation
@@ -248,7 +245,7 @@ function RootLayoutInner() {
                 backgroundColor: C.bg,
                 borderTopColor: C.border,
                 borderTopWidth: 1,
-                // Taller bar so all 7 tabs (icon + label) are fully visible
+                // Tall enough for each tab's icon + label
                 height: 68,
                 paddingBottom: 0,
                 paddingTop: 0,
@@ -294,6 +291,8 @@ function RootLayoutInner() {
             }}
           />
         ))}
+        {/* Settings opens from the gear in each screen's header, not from the tab bar */}
+        <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
       </Tabs>
         </View>
       </GestureDetector>

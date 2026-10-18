@@ -21,6 +21,7 @@ import {
 } from '../db/database';
 import { Card, SectionHeader, ProgressBar, MuscleTag } from '../components/ui';
 import BodyAnatomy from '../components/BodyAnatomy';
+import { SettingsButton } from '../components/SettingsButton';
 import { NutritionTrend } from '../components/NutritionTrend';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -203,8 +204,9 @@ export default function AnalyticsScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
+      <View style={[styles.header, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
         <Text style={styles.headerTitle}>Analytics</Text>
+        <SettingsButton />
       </View>
 
       <View style={styles.tabBar}>

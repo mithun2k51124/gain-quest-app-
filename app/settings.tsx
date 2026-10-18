@@ -4,8 +4,9 @@ import {
   Modal, TextInput, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';;
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { BackHandler } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
@@ -61,6 +62,17 @@ export default function SettingsScreen() {
     }, [load])
   );
   const onRefresh = () => { setRefresh(true); load(); setRefresh(false); };
+
+  // Back to the screen whose gear opened Settings (Home if unknown); Android back does the same
+  const router = useRouter();
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const goBack = useCallback(() => {
+    router.navigate((from && from !== '/settings' ? from : '/') as any);
+  }, [router, from]);
+  useFocusEffect(useCallback(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { goBack(); return true; });
+    return () => sub.remove();
+  }, [goBack]));
 
   const styles = makeStyles(C, isDark);
 
@@ -157,7 +169,11 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
+      <View style={[styles.header, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+        <TouchableOpacity style={styles.backBtn} onPress={goBack} activeOpacity={0.75}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} accessibilityLabel="Back">
+          <Ionicons name="chevron-back" size={20} color={C.accent} />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
 
@@ -336,6 +352,7 @@ function makeStyles(C: any, isDark: boolean) { return StyleSheet.create({
   safe:         { flex: 1, backgroundColor: C.bg },
   header:       { paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border },
   headerTitle:  { fontSize: 22, fontWeight: '800', color: C.text },
+  backBtn:      { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, backgroundColor: C.card, borderColor: C.border },
   scroll:       { padding: 16, paddingBottom: 40 },
   section:      { padding: 16 },
 

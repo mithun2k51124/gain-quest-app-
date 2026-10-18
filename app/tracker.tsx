@@ -39,6 +39,7 @@ import {
   FoodEntry,
 } from '../db/database';
 import { Card, Btn, ProgressBar, Ring, PickerModal, SectionHeader } from '../components/ui';
+import { SettingsButton } from '../components/SettingsButton';
 import { useTheme } from '../contexts/ThemeContext';
 import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -568,15 +569,18 @@ export default function TrackerScreen() {
           </Text>
         </View>
 
-        {/* Edit / Configure Button */}
-        <TouchableOpacity
-          style={styles.editHeaderBtn}
-          onPress={() => setEditModal(true)}
-          activeOpacity={0.75}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="create-outline" size={18} color={C.accent} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {/* Edit / Configure Button */}
+          <TouchableOpacity
+            style={styles.editHeaderBtn}
+            onPress={() => setEditModal(true)}
+            activeOpacity={0.75}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="create-outline" size={18} color={C.accent} />
+          </TouchableOpacity>
+          <SettingsButton />
+        </View>
       </View>
 
       {/* ── Interactive Draggable FlatList ── */}

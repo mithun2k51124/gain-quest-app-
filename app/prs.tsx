@@ -20,6 +20,7 @@ import { EXERCISE_LIBRARY, BODYWEIGHT_EXERCISES } from '../constants/theme';
 import { isBodyweightExercise, loadTypeOf } from '../constants/equipment';
 import { findExercise, MUSCLE_GROUP_ORDER } from '../constants/exerciseCatalog';
 import { WheelPicker } from '../components/WheelPicker';
+import { SettingsButton } from '../components/SettingsButton';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -547,10 +548,7 @@ export default function PRScreen() {
           <Text style={styles.title}>Personal Records</Text>
           <Text style={styles.subtitle}>{prs.length} lifts · {pinnedPRs.length} pinned</Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => openLog()} activeOpacity={0.85}>
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={styles.addBtnTxt}>Log PR</Text>
-        </TouchableOpacity>
+        <SettingsButton />
       </View>
 
       <ScrollView
@@ -626,6 +624,16 @@ export default function PRScreen() {
                 </View>
               </View>
             </View>
+
+            {/* Log a PR */}
+            <TouchableOpacity style={styles.logCard} onPress={() => openLog()} activeOpacity={0.85}>
+              <View style={styles.logIcon}><Ionicons name="add" size={22} color="#fff" /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.logTitle}>Log a PR</Text>
+                <Text style={styles.logSub}>Hit a new best? Save it to your record board.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={C.accent} />
+            </TouchableOpacity>
 
             {/* Pinned */}
             <Text style={styles.section}>Pinned</Text>
@@ -1068,6 +1076,10 @@ function makeStyles(C: any) {
     subtitle:    { fontSize: 12, color: C.muted, marginTop: 2, fontWeight: '600' },
     addBtn:      { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.accent, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
     addBtnTxt:   { color: '#fff', fontWeight: '800', fontSize: 13 },
+    logCard:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, padding: 14, borderRadius: 18, backgroundColor: C.accent + '12', borderWidth: 1, borderColor: C.accent + '40' },
+    logIcon:     { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accent },
+    logTitle:    { fontSize: 15, fontWeight: '800', color: C.text },
+    logSub:      { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 2 },
     scroll:      { paddingHorizontal: 16, paddingBottom: 120 },
 
     search:      { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 12, borderWidth: 1, borderColor: C.border, marginBottom: 14 },
