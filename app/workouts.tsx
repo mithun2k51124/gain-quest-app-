@@ -1259,7 +1259,10 @@ function PlannerTab({
   // Days fold up like the Log tab's muscle groups; today starts open
   const [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set([today]));
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardMode, setWizardMode] = useState<'setup' | 'next'>('setup');
   const [splitConfig, setSplitConfig] = useState(() => getSplitConfig());
+  // Sets × reps the split builder picked for each exercise
+  const doses = splitConfig?.doses ?? {};
 
   const getEdit = (day: string) =>
     edits[day] || {
@@ -1376,6 +1379,7 @@ function PlannerTab({
                       <View key={ex.id} style={styles.plannedExerciseRow}>
                         <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
                         <Text style={[styles.exName, { flex: 1 }]}>{ex.exercise_name}</Text>
+                        {doses[ex.exercise_name] ? <Text style={ps.dose}>{doses[ex.exercise_name]}</Text> : null}
                         <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} />
                         <TouchableOpacity onPress={() => onDeleteExercise(ex.id)} style={[styles.deletePlanExBtn, { marginLeft: 10 }]}>
                           <Text style={styles.deletePlanExText}>×</Text>
@@ -1402,7 +1406,12 @@ function PlannerTab({
   return (
     <>
       <SectionHeader title="Split" />
-      <SplitCard config={splitConfig} plans={plans} onOpen={() => setWizardOpen(true)} />
+      <SplitCard
+        config={splitConfig}
+        plans={plans}
+        onOpen={() => { setWizardMode('setup'); setWizardOpen(true); }}
+        onNewBlock={() => { setWizardMode('next'); setWizardOpen(true); }}
+      />
 
       <SectionHeader title="Today" />
       {renderDay(today)}
@@ -1431,6 +1440,7 @@ function PlannerTab({
 
       <SplitWizard
         visible={wizardOpen}
+        mode={wizardMode}
         onClose={() => setWizardOpen(false)}
         onApplied={() => {
           setSplitConfig(getSplitConfig());
@@ -1453,6 +1463,7 @@ function makePlannerStyles(C: any) {
     dots:      { flexDirection: 'row', gap: 4 },
     dot:       { width: 8, height: 8, borderRadius: 4 },
     body:      { paddingHorizontal: 16, paddingBottom: 16, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
+    dose:      { fontSize: 12, fontWeight: '800', color: C.textSub, marginLeft: 8 },
   });
 }
 
