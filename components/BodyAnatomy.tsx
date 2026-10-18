@@ -16,8 +16,6 @@ interface Props {
   showToggle?: boolean;
 }
 
-const W = 260;
-const H = 390;
 
 // Masks per view; a group missing from a view isn't visible from that side
 const MASKS: Record<BodyView, Partial<Record<string, ImageSourcePropType>>> = {
@@ -42,7 +40,11 @@ const MASKS: Record<BodyView, Partial<Record<string, ImageSourcePropType>>> = {
 // Side columns: upper body on the left, lower body on the right
 const UPPER = ['Chest', 'Shoulders', 'Upper Back', 'Biceps', 'Triceps', 'Forearms'];
 const LOWER = ['Core', 'Lower Back', 'Legs'];
-const SIDE_W = 74;
+const SIDE_W = 54;
+const SIDE_GAP = 6;
+// body_front/back.png are cut to the body with a transparent background (masks match)
+const BODY_AR = 654 / 1199;
+const MAX_H = 420;
 
 /** Reds for 1, 2, 3, 4 and 5+ sets: light red deepening to dark red. */
 export const SHADES: { color: string; opacity: number }[] = [
@@ -76,7 +78,7 @@ function normalizeSetCounts(
       else if (['upper back', 'trap', 'trapezius', 'rhomboid', 'lat'].some(x => lower.includes(x))) target = 'Upper Back';
       else if (['lower back', 'lumbar', 'erector'].some(x => lower.includes(x))) target = 'Lower Back';
       else if (lower === 'back') {
-        // legacy 'Back' → light up both
+        // legacy 'Back' â†’ light up both
         norm['Upper Back'] = (norm['Upper Back'] || 0) + count;
         norm['Lower Back'] = (norm['Lower Back'] || 0) + count;
         continue;
@@ -108,27 +110,28 @@ export default function BodyAnatomy({
   // Groups trained but only visible from the other side
   const otherSide = trained.filter(([m]) => !masks[m]).map(([m]) => m);
 
-  // The body shrinks to leave room for a muscle column on each side
+  // The body takes all the width the two side panels leave, up to MAX_H tall
   const [rowW, setRowW] = useState(0);
-  const bw = rowW ? Math.max(150, Math.min(W, rowW - 2 * (SIDE_W + 8))) : 200;
-  const bh = Math.round(bw * (H / W));
+  const room = rowW ? rowW - 2 * (SIDE_W + SIDE_GAP) : 180;
+  const bh = Math.round(Math.min(MAX_H, room / BODY_AR));
+  const bw = Math.round(bh * BODY_AR);
 
+  // One slim vertical panel per side, as tall as the body
   const renderSide = (title: string, group: string[]) => {
     const list = trained.filter(([m]) => group.includes(m));
     return (
-      <View style={styles.side}>
+      <View style={[styles.side, { minHeight: bh }]}>
         <Text style={styles.sideTitle}>{title}</Text>
-        {list.length === 0 && <Text style={styles.sideNone}>Not trained</Text>}
-        {list.map(([muscle, sets]) => {
+        {list.length === 0 && <Text style={styles.sideNone}>â€”</Text>}
+        {list.map(([muscle, sets], i) => {
           const shade = shadeFor(sets);
           return (
-            <TouchableOpacity key={muscle} style={styles.sideItem} activeOpacity={0.8}
-              disabled={!onSelectMuscle} onPress={() => onSelectMuscle?.(muscle, sets)}>
-              <View style={[styles.chipDot, { backgroundColor: shade.color }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.chipTxt} numberOfLines={1} adjustsFontSizeToFit>{muscle}</Text>
-                <Text style={styles.chipSets}>{sets} {sets === 1 ? 'set' : 'sets'}</Text>
-              </View>
+            <TouchableOpacity key={muscle} activeOpacity={0.8} disabled={!onSelectMuscle}
+              onPress={() => onSelectMuscle?.(muscle, sets)}
+              style={[styles.sideItem, i > 0 && styles.sideDivider]}>
+              <Text style={[styles.sideNum, { color: shade.color }]}>{sets}</Text>
+              <Text style={styles.sideUnit}>{sets === 1 ? 'set' : 'sets'}</Text>
+              <Text style={styles.sideName} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{muscle}</Text>
             </TouchableOpacity>
           );
         })}
@@ -152,9 +155,9 @@ export default function BodyAnatomy({
       {/* Upper-body muscles on the left, lower body on the right, the body in between */}
       <View style={styles.bodyRow} onLayout={e => setRowW(e.nativeEvent.layout.width)}>
         {renderSide('Upper body', UPPER)}
-        <View style={{ width: bw, height: bh, borderRadius: 12, overflow: 'hidden' }}>
+        <View style={{ width: bw, height: bh }}>
           <Image
-            source={view === 'front' ? require('../assets/body_front.jpg') : require('../assets/body_back.jpg')}
+            source={view === 'front' ? require('../assets/body_front.png') : require('../assets/body_back.png')}
             style={{ width: bw, height: bh, resizeMode: 'cover' }}
           />
           {trained.map(([muscle, sets]) => {
@@ -197,11 +200,15 @@ function makeStyles(C: any, isDark: boolean) {
   return StyleSheet.create({
     container:   { alignItems: 'center', paddingTop: 2, paddingBottom: 4 },
     toggleRow:   { flexDirection: 'row', backgroundColor: isDark ? C.card : '#E8EBF3', borderRadius: 14, padding: 4, marginBottom: 10, gap: 4, borderWidth: 1, borderColor: C.border },
-    bodyRow:     { flexDirection: 'row', alignSelf: 'stretch', justifyContent: 'space-between', alignItems: 'flex-start' },
-    side:        { width: SIDE_W, paddingTop: 6, gap: 6 },
-    sideTitle:   { fontSize: 9, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 },
-    sideNone:    { fontSize: 11, fontWeight: '600', color: C.muted },
-    sideItem:    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 7, paddingVertical: 6, borderRadius: 10, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
+    bodyRow:     { flexDirection: 'row', alignSelf: 'stretch', justifyContent: 'space-between', alignItems: 'center' },
+    side:        { width: SIDE_W, borderRadius: 16, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'center', backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
+    sideTitle:   { fontSize: 8, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center', marginBottom: 6 },
+    sideNone:    { fontSize: 14, fontWeight: '700', color: C.border, marginTop: 4 },
+    sideItem:    { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 5 },
+    sideDivider: { borderTopWidth: 1, borderTopColor: C.border },
+    sideNum:     { fontSize: 17, fontWeight: '900', lineHeight: 19 },
+    sideUnit:    { fontSize: 8, fontWeight: '700', color: C.muted, textTransform: 'uppercase' },
+    sideName:    { fontSize: 10, fontWeight: '700', color: C.text, textAlign: 'center', marginTop: 3 },
     btn:         { paddingVertical: 7, paddingHorizontal: 28, borderRadius: 10 },
     btnA:        { backgroundColor: C.accent, shadowColor: C.accent, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 3 },
     btnTxt:      { fontSize: 13, fontWeight: '700', color: C.muted },
