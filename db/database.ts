@@ -631,6 +631,7 @@ export function createWorkoutSession(sessionDate: string, muscleGroups: string, 
 }
 
 export function getWorkoutSessions(limit = 30): WorkoutSession[] {
+  // limit -1 = every session
   return getDb().getAllSync<WorkoutSession>('SELECT * FROM workout_sessions ORDER BY session_date DESC LIMIT ?', [
     limit,
   ]);
@@ -782,6 +783,14 @@ export function getPRProgressionHistory(exerciseName: string): PRProgressionEntr
     seen.add(key);
     return true;
   });
+}
+
+/** Every exercise logged on or after a date (YYYY-MM-DD), oldest first. */
+export function getExerciseLogsSince(date: string): ExerciseLog[] {
+  return getDb().getAllSync<ExerciseLog>(
+    'SELECT * FROM exercise_logs WHERE session_date>=? ORDER BY session_date ASC, id ASC',
+    [date]
+  );
 }
 
 /** The most recent weight logged for an exercise, if it was ever logged with one. */

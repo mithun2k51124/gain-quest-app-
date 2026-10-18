@@ -29,6 +29,8 @@ import {
   checkPRForLog,
   isRepsOnly,
   getLastWeight,
+  getExerciseLogsSince,
+  toDateStr,
   updateDailyLog,
   updateStreak,
   todayStr,
@@ -43,6 +45,7 @@ import { ExerciseGuideButton } from '../components/ExerciseGuide';
 import { findExercise } from '../constants/exerciseCatalog';
 import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
 import { WheelPicker } from '../components/WheelPicker';
+import { WorkoutCalendar, longDate } from '../components/WorkoutCalendar';
 import { weightStepsFor } from '../constants/equipment';
 import { closestOnLadder, stepsAway } from '../constants/startingLoads';
 import { getLoadFeedback, saveLoadFeedback, Vote } from '../utils/loadFeedback';
@@ -52,6 +55,75 @@ import { useCustomAlert } from '../contexts/AlertContext';
 import { MUSCLE_GROUPS, DAYS, EXERCISE_LIBRARY } from '../constants/theme';
 
 type Tab = 'Planner' | 'Muscles' | 'Log' | 'History';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Muscle recovery and frequency (Muscles tab)
+// ─────────────────────────────────────────────────────────────────────────────
+/** YYYY-MM-DD for n days before today */
+function daysAgoStr(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return toDateStr(d);
+}
+const dayDiff = (from: string, to: string) =>
+  Math.round((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / 86400000);
+
+/** Days a muscle needs between hard sessions: big groups longer, small ones less. */
+const RECOVERY_DAYS: Record<string, number> = {
+  Legs: 3, 'Lower Back': 3, 'Upper Back': 2, Chest: 2, Shoulders: 2, Biceps: 2, Triceps: 2, Forearms: 1, Core: 1,
+};
+
+type MuscleStatus = 'ready' | 'recovering' | 'overworked' | 'overdue' | 'new';
+
+interface MuscleInsight {
+  muscle: string;
+  status: MuscleStatus;
+  daysSince: number | null;   // null = never trained
+  readyIn: number;            // days of rest left
+  recovery: number;           // 0–1
+  hitsWeek: number;           // days trained in the last 7
+  hitsMonth: number;          // days trained in the last 28
+  setsWeek: number;
+  week: boolean[];            // last 7 days, oldest first, trained or not
+}
+
+function muscleInsights(logs: ExerciseLog[], tracker: MuscleEntry[]): MuscleInsight[] {
+  const today = todayStr();
+  const days: Record<string, Set<string>> = {};
+  const setsWeek: Record<string, number> = {};
+  const weekStart = daysAgoStr(6);
+  for (const l of logs) {
+    // Old logs used a single 'Back' group: it counts for both halves
+    const groups = l.muscle_group === 'Back' ? ['Upper Back', 'Lower Back'] : [l.muscle_group];
+    for (const g of groups) {
+      (days[g] ??= new Set()).add(l.session_date);
+      if (l.session_date >= weekStart) setsWeek[g] = (setsWeek[g] ?? 0) + (l.sets || 1);
+    }
+  }
+  return MUSCLE_GROUPS.map(muscle => {
+    const trained = days[muscle] ?? new Set<string>();
+    const sorted = [...trained].sort();
+    // Older than four weeks: fall back to the tracker's last-trained date
+    const tracked = tracker.find(t => t.muscle_group === muscle)?.last_trained ?? null;
+    const last = sorted[sorted.length - 1] ?? tracked?.slice(0, 10) ?? null;
+    const daysSince = last ? Math.max(0, dayDiff(last, today)) : null;
+    const need = RECOVERY_DAYS[muscle] ?? 2;
+    const week = Array.from({ length: 7 }, (_, i) => trained.has(daysAgoStr(6 - i)));
+    const hitsWeek = week.filter(Boolean).length;
+    const readyIn = daysSince === null ? 0 : Math.max(0, need - daysSince);
+    const status: MuscleStatus =
+      daysSince === null ? 'new'
+      : hitsWeek >= 4 ? 'overworked'
+      : readyIn > 0 ? 'recovering'
+      : daysSince >= 8 ? 'overdue'
+      : 'ready';
+    return {
+      muscle, status, daysSince, readyIn,
+      recovery: daysSince === null ? 1 : Math.min(1, daysSince / need),
+      hitsWeek, hitsMonth: trained.size, setsWeek: setsWeek[muscle] ?? 0, week,
+    };
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Neumorphic Bottom-Sheet Picker  (replaces old PickerModal from ui.tsx for
@@ -792,7 +864,8 @@ export default function WorkoutsScreen() {
   const [planExercises, setPlanExercises] = useState<WorkoutPlanExercise[]>([]);
   const [muscles, setMuscles] = useState<MuscleEntry[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
-  const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
+  const [histDate, setHistDate] = useState<string | null>(null);  // History day; null = latest workout
+  const [recentLogs, setRecentLogs] = useState<ExerciseLog[]>([]);  // last 4 weeks, for the Muscles tab
   const [refresh, setRefresh] = useState(false);
 
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -824,7 +897,8 @@ export default function WorkoutsScreen() {
     setPlans(getWorkoutPlans());
     setPlanExercises(getWorkoutPlanExercises());
     setMuscles(getMuscleTracker());
-    setSessions(getWorkoutSessions(20));
+    setSessions(getWorkoutSessions(-1));  // all of them: the History calendar can reach any day
+    setRecentLogs(getExerciseLogsSince(daysAgoStr(27)));
     
     const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
     setTodaysExercises(getWorkoutPlanExercises(dayName));
@@ -876,6 +950,8 @@ export default function WorkoutsScreen() {
     const { isNewPR, oldPR, new1RM } = checkPRForLog(exName, s, r, w);
 
     logExercise(currentSessionId, sessionDate, exName, exMuscle, s, r, w);
+    setRecentLogs(getExerciseLogsSince(daysAgoStr(27)));
+    setMuscles(getMuscleTracker());
 
     setExercises(prev => [
       ...prev,
@@ -904,18 +980,6 @@ export default function WorkoutsScreen() {
     setSessionMGs(prev =>
       prev.includes(mg) ? prev.filter(m => m !== mg) : [...prev, mg]
     );
-  };
-
-  const getDaysAgo = (lastTrained: string | null) => {
-    if (!lastTrained) return 999;
-    return Math.floor((Date.now() - new Date(lastTrained).getTime()) / 86400000);
-  };
-
-  const urgencyColor = (days: number) => {
-    if (days === 0) return C.green;
-    if (days <= 3) return C.orange;
-    if (days <= 7) return '#FF5722';
-    return C.red;
   };
 
   return (
@@ -964,51 +1028,116 @@ export default function WorkoutsScreen() {
           />
         )}
 
-        {tab === 'Muscles' && (
-          <>
-            <SectionHeader title="Muscle Group Recovery" />
-            {muscles.map(m => {
-              const daysAgo = getDaysAgo(m.last_trained);
-              const color = urgencyColor(daysAgo);
-              const mgColor = C.mg[m.muscle_group] || C.accent;
+        {tab === 'Muscles' && (() => {
+          const insights = muscleInsights(recentLogs, muscles);
+          const STATUS: Record<MuscleStatus, { label: string; color: string; icon: keyof typeof Ionicons.glyphMap }> = {
+            ready:      { label: 'Ready',      color: C.green,  icon: 'flash' },
+            recovering: { label: 'Recovering', color: C.orange, icon: 'battery-half' },
+            overworked: { label: 'Rest it',    color: C.red,    icon: 'warning' },
+            overdue:    { label: 'Overdue',    color: C.accent, icon: 'time' },
+            new:        { label: 'Not trained', color: C.muted, icon: 'add-circle' },
+          };
+          const advice = (m: MuscleInsight) =>
+            m.status === 'new' ? 'No sessions yet. Add it to your plan.'
+            : m.status === 'overworked' ? `Hit ${m.hitsWeek}× this week. Take a rest day.`
+            : m.status === 'recovering' ? (m.daysSince === 0 ? `Trained today. Rest ${m.readyIn} ${m.readyIn === 1 ? 'day' : 'days'}.` : `Still recovering. Ready in ${m.readyIn} ${m.readyIn === 1 ? 'day' : 'days'}.`)
+            : m.status === 'overdue' ? `${m.daysSince} days since you trained it. Train it soon.`
+            : `Recovered. Good to train today.`;
+          // Today's call: what to train (most rested first) and what to leave alone
+          const train = insights.filter(m => m.status === 'overdue' || m.status === 'ready')
+            .sort((a, b) => (b.daysSince ?? 0) - (a.daysSince ?? 0));
+          const rest = insights.filter(m => m.status === 'recovering' || m.status === 'overworked');
+          const count = (s: MuscleStatus[]) => insights.filter(m => s.includes(m.status)).length;
+          const weekLetters = Array.from({ length: 7 }, (_, i) => 'SMTWTFS'[new Date(daysAgoStr(6 - i) + 'T00:00:00').getDay()]);
 
-              return (
-                <View
-                  key={m.muscle_group}
-                  style={styles.muscleCard}
-                >
-                  <View style={[styles.muscleIcon, { backgroundColor: mgColor + '22' }]}>
-                    <Svg width={26} height={26} viewBox="0 0 64 64">
-                      {/* Dumbbell bar */}
-                      <Rect x="20" y="29" width="24" height="6" rx="3" fill={mgColor} />
-                      {/* Left weight plate outer */}
-                      <Rect x="6" y="20" width="8" height="24" rx="4" fill={mgColor} opacity={0.85} />
-                      {/* Left weight plate inner */}
-                      <Rect x="14" y="24" width="6" height="16" rx="3" fill={mgColor} />
-                      {/* Right weight plate outer */}
-                      <Rect x="50" y="20" width="8" height="24" rx="4" fill={mgColor} opacity={0.85} />
-                      {/* Right weight plate inner */}
-                      <Rect x="44" y="24" width="6" height="16" rx="3" fill={mgColor} />
-                    </Svg>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.muscleName}>{m.muscle_group}</Text>
-                    <Text style={[styles.muscleStatus, { color }]}>
-                      {daysAgo === 999
-                        ? 'Never trained'
-                        : daysAgo === 0
-                          ? 'Trained Today'
-                          : `${daysAgo} day${daysAgo > 1 ? 's' : ''} ago`}
-                    </Text>
-                    <Text style={styles.muscleSessions}>Sessions: {m.total_sessions}</Text>
-                  </View>
-                  {/* Recovery indicator bar */}
-                  <View style={[styles.recoveryDot, { backgroundColor: color }]} />
+          return (
+            <>
+              <SectionHeader title="Muscle Recovery" />
+
+              {/* ── Today's call ── */}
+              <View style={styles.mcHero}>
+                <Text style={styles.mcKicker}>TODAY'S CALL</Text>
+                <View style={styles.mcCounts}>
+                  {([['ready', 'overdue'], ['recovering'], ['overworked']] as MuscleStatus[][]).map(s => (
+                    <View key={s[0]} style={styles.mcCount}>
+                      <Text style={[styles.mcCountNum, { color: STATUS[s[0]].color }]}>{count(s)}</Text>
+                      <Text style={styles.mcCountLbl}>{s[0] === 'ready' ? 'ready' : s[0] === 'recovering' ? 'recovering' : 'need rest'}</Text>
+                    </View>
+                  ))}
                 </View>
-              );
-            })}
-          </>
-        )}
+                <View style={styles.mcAdvice}>
+                  <Ionicons name="flash" size={14} color={C.green} />
+                  <Text style={styles.mcAdviceTxt}>
+                    <Text style={{ fontWeight: '800', color: C.text }}>Train: </Text>
+                    {train.length ? train.slice(0, 4).map(m => m.muscle).join(' · ') : 'Everything is recovering. Take a rest day.'}
+                  </Text>
+                </View>
+                {rest.length > 0 && (
+                  <View style={styles.mcAdvice}>
+                    <Ionicons name="bed" size={14} color={C.orange} />
+                    <Text style={styles.mcAdviceTxt}>
+                      <Text style={{ fontWeight: '800', color: C.text }}>Rest: </Text>
+                      {rest.map(m => m.muscle).join(' · ')}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* ── Every main muscle group ── */}
+              {insights.map(m => {
+                const st = STATUS[m.status];
+                const mc = C.mg[m.muscle] || C.accent;
+                const R = 20, CIRC = 2 * Math.PI * R;
+                return (
+                  <View key={m.muscle} style={styles.mcCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      {/* Recovery ring */}
+                      <View style={{ width: 50, height: 50, alignItems: 'center', justifyContent: 'center' }}>
+                        <Svg width={50} height={50} style={StyleSheet.absoluteFill}>
+                          <Circle cx={25} cy={25} r={R} stroke={C.border} strokeWidth={4} fill="none" />
+                          <Circle cx={25} cy={25} r={R} stroke={st.color} strokeWidth={4} fill="none"
+                            strokeDasharray={`${CIRC * m.recovery} ${CIRC}`} strokeLinecap="round"
+                            transform="rotate(-90 25 25)" />
+                        </Svg>
+                        <Text style={[styles.mcPct, { color: st.color }]}>{Math.round(m.recovery * 100)}%</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={[styles.exDot, { backgroundColor: mc }]} />
+                          <Text style={styles.muscleName}>{m.muscle}</Text>
+                        </View>
+                        <Text style={styles.mcAdviceSmall}>{advice(m)}</Text>
+                      </View>
+                      <View style={[styles.mcPill, { backgroundColor: st.color + '1F', borderColor: st.color + '55' }]}>
+                        <Ionicons name={st.icon} size={11} color={st.color} />
+                        <Text style={[styles.mcPillTxt, { color: st.color }]}>{st.label}</Text>
+                      </View>
+                    </View>
+
+                    {/* Last 7 days + frequency */}
+                    <View style={styles.mcFoot}>
+                      <View style={styles.mcWeek}>
+                        {m.week.map((hit, i) => (
+                          <View key={i} style={{ alignItems: 'center', gap: 3 }}>
+                            <View style={[styles.mcDay, hit && { backgroundColor: mc, borderColor: mc }]} />
+                            <Text style={[styles.mcDayLbl, i === 6 && { color: C.text }]}>{weekLetters[i]}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.mcFreq}>{m.hitsWeek}×<Text style={styles.mcFreqUnit}> this week</Text></Text>
+                        <Text style={styles.mcFreqSub}>{m.setsWeek} sets · {m.hitsMonth}× in 4 weeks</Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+              <Text style={styles.mcNote}>
+                Recovery: legs and lower back need about 3 days, chest, back, shoulders and arms about 2, core and forearms 1. Training a muscle 2–3× a week is the sweet spot.
+              </Text>
+            </>
+          );
+        })()}
 
         {tab === 'Log' && (
           <>
@@ -1139,10 +1268,7 @@ export default function WorkoutsScreen() {
           const sortedDates = Object.keys(dateGroups).sort((a, b) => b.localeCompare(a));
 
           // Which date is currently "active"
-          const activeDate: string | null =
-            selectedHistoryId != null
-              ? (sessions.find(s => s.id === selectedHistoryId)?.session_date ?? null)
-              : (sortedDates[0] ?? null);
+          const activeDate: string | null = histDate ?? sortedDates[0] ?? null;
 
           // All exercises for the active date across ALL sessions that day
           const exsForActiveDate: ExerciseLog[] = activeDate ? getExercisesForDate(activeDate) : [];
@@ -1166,143 +1292,86 @@ export default function WorkoutsScreen() {
             <>
               <SectionHeader title="Workout Anatomy & History" />
 
-              {/* ── Anatomy Diagram Card ── */}
-              <Card accent={C.red}>
-                <View style={styles.section}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <Text style={styles.sectionTitle}>
-                      {activeDate ? activeDate : 'Target Muscles'}
-                    </Text>
-                    {activeDate && dateGroups[activeDate] && (
-                      <View style={{ backgroundColor: C.red + '22', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, flexShrink: 1, maxWidth: '55%' }}>
-                        <Text style={{ fontSize: 11, color: C.red, fontWeight: '800' }} numberOfLines={1}>
-                          {dateGroups[activeDate].allMuscles.join(', ')}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
-                    Each muscle you trained turns red. The more sets, the deeper the red (1 set light, 6+ sets darkest).
-                  </Text>
-
-                  {/* Body Vector Anatomy with Set Volume Heatmap */}
-                  <BodyAnatomy muscleSetCounts={setCountsMap} />
-
-                  {/* Date Selector — one button per unique date */}
-                  {sortedDates.length > 0 && (
-                    <View style={{ marginTop: 12 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        Select Day:
-                      </Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
-                        {sortedDates.map(date => {
-                          const isSel = activeDate === date;
-                          return (
-                            <TouchableOpacity
-                              key={date}
-                              onPress={() => {
-                                // Set selectedHistoryId to the first session of that date
-                                const firstSession = dateGroups[date].sessions[0];
-                                setSelectedHistoryId(firstSession?.id ?? null);
-                              }}
-                              style={{
-                                paddingVertical: 6,
-                                paddingHorizontal: 14,
-                                borderRadius: 12,
-                                backgroundColor: isSel ? C.red : (isDark ? C.card : '#E2E8F0'),
-                                borderWidth: 1,
-                                borderColor: isSel ? C.red : C.border,
-                              }}
-                            >
-                              <Text style={{ fontSize: 12, fontWeight: '700', color: isSel ? '#FFF' : C.text }}>
-                                {date}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-              </Card>
-
-              <SectionHeader title="Past Sessions" />
               {sessions.length === 0 ? (
                 <EmptyState icon="clipboard-outline" message="No workouts logged yet" sub="Go to Log tab to start tracking" />
               ) : (
-                sortedDates.map(date => {
-                  const group = dateGroups[date];
-                  const isSelected = activeDate === date;
-                  const dayExs = getExercisesForDate(date);
-                  // Deduplicate exercises by name (keep highest weight/reps)
-                  const seenEx = new Set<string>();
-                  const dedupedExs = dayExs.filter(ex => {
-                    if (seenEx.has(ex.exercise_name)) return false;
-                    seenEx.add(ex.exercise_name);
-                    return true;
-                  });
+                <>
+                  {/* ── Anatomy card with the day picker ── */}
+                  <Card accent={C.red}>
+                    <View style={styles.section}>
+                      {activeDate && (
+                        <WorkoutCalendar selected={activeDate} workoutDates={sortedDates} color={C.red} onSelect={setHistDate} />
+                      )}
+                      <Text style={{ fontSize: 12, color: C.muted, marginTop: 12, marginBottom: 4 }}>
+                        Each muscle you trained turns red. More sets, deeper red (1 set light red, 5+ sets darkest).
+                      </Text>
+                      <BodyAnatomy muscleSetCounts={setCountsMap} />
+                    </View>
+                  </Card>
 
-                  return (
-                    <TouchableOpacity
-                      key={date}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        const firstSession = group.sessions[0];
-                        setSelectedHistoryId(firstSession?.id ?? null);
-                      }}
-                      style={{ marginBottom: 14 }}
-                    >
-                      <Card accent={isSelected ? C.red : C.accent}>
+                  {/* ── That day's workout ── */}
+                  {activeDate && (() => {
+                    // Sets of the same exercise sit together, in the order they were done
+                    const byEx: { name: string; muscle: string; sets: ExerciseLog[] }[] = [];
+                    for (const ex of exsForActiveDate) {
+                      const g = byEx.find(e => e.name === ex.exercise_name);
+                      if (g) g.sets.push(ex); else byEx.push({ name: ex.exercise_name, muscle: ex.muscle_group, sets: [ex] });
+                    }
+                    const totalSets = exsForActiveDate.reduce((n, e) => n + (e.sets || 1), 0);
+                    const volume = exsForActiveDate.reduce((n, e) => n + (e.sets || 1) * e.reps * e.weight, 0);
+                    return (
+                      <Card accent={C.accent}>
                         <View style={styles.section}>
-                          <View style={styles.histHeader}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                              <Text style={[styles.histDate, isSelected && { color: C.red, fontWeight: '800' }]}>
-                                {date}
-                              </Text>
-                              {isSelected && (
-                                <View style={{ backgroundColor: C.red, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>VIEWING</Text>
+                          <Text style={styles.histKicker}>YOUR WORKOUT</Text>
+                          <Text style={styles.histTitle}>{longDate(activeDate)}</Text>
+                          {byEx.length > 0 ? (
+                            <>
+                              <View style={styles.histStats}>
+                                <View style={styles.histStat}>
+                                  <Text style={styles.histStatNum}>{byEx.length}</Text>
+                                  <Text style={styles.histStatLbl}>exercises</Text>
                                 </View>
-                              )}
-                              {group.sessions.length > 1 && (
-                                <View style={{ backgroundColor: C.accent + '22', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                                  <Text style={{ color: C.accent, fontSize: 10, fontWeight: '700' }}>{group.sessions.length} sessions</Text>
+                                <View style={styles.histStat}>
+                                  <Text style={styles.histStatNum}>{totalSets}</Text>
+                                  <Text style={styles.histStatLbl}>sets</Text>
                                 </View>
-                              )}
-                            </View>
-                            <View style={styles.mgRow}>
-                              {group.allMuscles.slice(0, 4).map((g: string) => (
-                                <MuscleTag key={g} name={g} />
-                              ))}
-                              {group.allMuscles.length > 4 && (
-                                <View style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-                                  <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600' }}>+{group.allMuscles.length - 4} more</Text>
+                                <View style={styles.histStat}>
+                                  <Text style={styles.histStatNum}>{volume >= 1000 ? `${+(volume / 1000).toFixed(1)}t` : `${Math.round(volume)}`}</Text>
+                                  <Text style={styles.histStatLbl}>{volume >= 1000 ? 'lifted' : 'kg lifted'}</Text>
                                 </View>
-                              )}
-                            </View>
-                          </View>
-
-                          {dedupedExs.slice(0, 5).map((ex: ExerciseLog) => (
-                            <View key={ex.id} style={styles.exRow}>
-                              <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
-                              <Text style={styles.exName}>{ex.exercise_name}</Text>
-                              <Text style={styles.exDetail}>
-                                {ex.sets}x{ex.reps}{ex.weight > 0 ? ` @ ${ex.weight}${ex.unit}` : ''}
-                              </Text>
-                            </View>
-                          ))}
-
-                          {dedupedExs.length > 5 && (
-                            <Text style={styles.moreText}>+ {dedupedExs.length - 5} more exercises</Text>
-                          )}
-                          {dedupedExs.length === 0 && dayExs.length === 0 && (
-                            <Text style={styles.moreText}>Tap to view anatomy for this day</Text>
+                              </View>
+                              {byEx.map(e => {
+                                const mc = C.mg[e.muscle] || C.accent;
+                                return (
+                                  <View key={e.name} style={styles.histEx}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                      <View style={[styles.exDot, { backgroundColor: mc }]} />
+                                      <Text style={[styles.exName, { flex: 1 }]} numberOfLines={1}>{e.name}</Text>
+                                      <Text style={[styles.histMuscle, { color: mc }]}>{e.muscle}</Text>
+                                    </View>
+                                    <View style={styles.histSets}>
+                                      {e.sets.map((s, i) => (
+                                        <View key={s.id ?? i} style={styles.histSet}>
+                                          <Text style={styles.histSetTxt}>
+                                            {(s.sets || 1) > 1 ? `${s.sets}×` : ''}{s.reps}{s.weight > 0 ? ` × ${s.weight} kg` : ' reps'}
+                                          </Text>
+                                        </View>
+                                      ))}
+                                    </View>
+                                  </View>
+                                );
+                              })}
+                            </>
+                          ) : (
+                            <Text style={[styles.moreText, { marginTop: 10 }]}>
+                              {dateGroups[activeDate] ? 'Session saved without exercise details.' : 'Rest day: nothing logged.'}
+                            </Text>
                           )}
                         </View>
                       </Card>
-                    </TouchableOpacity>
-                  );
-                })
+                    );
+                  })()}
+                </>
               )}
             </>
           );
@@ -1911,6 +1980,44 @@ function makeStyles(C: any) { return StyleSheet.create({
     color: C.accent,
   },
   // PR overlay
+  // History: the selected day's workout
+  histKicker: { fontSize: 11, fontWeight: '800', color: C.accent, letterSpacing: 1 },
+  histTitle: { fontSize: 18, fontWeight: '800', color: C.text, marginTop: 2 },
+  histStats: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 6 },
+  histStat: { flex: 1, alignItems: 'center', paddingVertical: 10, backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+  histStatNum: { fontSize: 18, fontWeight: '800', color: C.text },
+  histStatLbl: { fontSize: 10, fontWeight: '700', color: C.muted, marginTop: 2, textTransform: 'uppercase' },
+  histEx: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  histMuscle: { fontSize: 11, fontWeight: '800' },
+  histSets: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, paddingLeft: 16 },
+  histSet: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
+  histSetTxt: { fontSize: 12, fontWeight: '700', color: C.textSub },
+  // Muscles tab
+  mcHero: {
+    backgroundColor: C.card, borderRadius: 20, padding: 16, marginBottom: 14,
+    borderWidth: 1, borderColor: C.accent + '55',
+    shadowColor: C.accent, shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4,
+  },
+  mcKicker: { fontSize: 11, fontWeight: '800', color: C.accent, letterSpacing: 1.2 },
+  mcCounts: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 12 },
+  mcCount: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 14, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
+  mcCountNum: { fontSize: 24, fontWeight: '900' },
+  mcCountLbl: { fontSize: 10, fontWeight: '700', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
+  mcAdvice: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 6 },
+  mcAdviceTxt: { flex: 1, fontSize: 13, color: C.textSub, lineHeight: 18 },
+  mcCard: { backgroundColor: C.card, borderRadius: 18, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: C.border },
+  mcPct: { fontSize: 11, fontWeight: '800' },
+  mcAdviceSmall: { fontSize: 12, color: C.muted, marginTop: 3, lineHeight: 16 },
+  mcPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1 },
+  mcPillTxt: { fontSize: 11, fontWeight: '800' },
+  mcFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border },
+  mcWeek: { flexDirection: 'row', gap: 6 },
+  mcDay: { width: 14, height: 14, borderRadius: 4, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
+  mcDayLbl: { fontSize: 9, fontWeight: '700', color: C.muted },
+  mcFreq: { fontSize: 16, fontWeight: '900', color: C.text },
+  mcFreqUnit: { fontSize: 11, fontWeight: '700', color: C.muted },
+  mcFreqSub: { fontSize: 10, fontWeight: '600', color: C.muted, marginTop: 1 },
+  mcNote: { fontSize: 11, color: C.muted, lineHeight: 16, marginTop: 4, marginBottom: 12, paddingHorizontal: 4 },
   prOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15,20,30,0.55)',

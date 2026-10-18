@@ -39,14 +39,13 @@ const MASKS: Record<BodyView, Partial<Record<string, ImageSourcePropType>>> = {
   },
 };
 
-/** Red shades for 1, 2, 3, 4, 5 and 6+ sets. */
-const SHADES: { color: string; opacity: number }[] = [
-  { color: '#FCA5A5', opacity: 0.55 },
-  { color: '#F87171', opacity: 0.6 },
-  { color: '#EF4444', opacity: 0.66 },
-  { color: '#DC2626', opacity: 0.74 },
-  { color: '#B91C1C', opacity: 0.8 },
-  { color: '#7F1D1D', opacity: 0.86 },
+/** Reds for 1, 2, 3, 4 and 5+ sets: light red deepening to dark red. */
+export const SHADES: { color: string; opacity: number }[] = [
+  { color: '#F25C54', opacity: 0.6 },
+  { color: '#E53935', opacity: 0.68 },
+  { color: '#C62828', opacity: 0.76 },
+  { color: '#A01818', opacity: 0.84 },
+  { color: '#7A0E0E', opacity: 0.9 },
 ];
 const shadeFor = (sets: number) => SHADES[Math.min(sets, SHADES.length) - 1];
 
