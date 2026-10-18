@@ -24,7 +24,7 @@ import {
   Candidate, Level, PatternKey, SkillKey, PATTERNS, POOLS, SKILL_ORDER,
 } from '../constants/exercisePools';
 import {
-  LOADS, DUMBBELL_SIZES, KETTLEBELL_SIZES, PLATE_SIZES, MEDBALL_SIZES, BAR_KG, EZ_BAR_KG, SMITH_MIN_KG, MACHINE_STEP_KG,
+  LOADS, DUMBBELL_SIZES, KETTLEBELL_SIZES, PLATE_SIZES, MEDBALL_SIZES, BAR_KG, EZ_BAR_KG, SMITH_MIN_KG, MACHINE_STEP_KG, BAR_STEP_KG,
 } from '../constants/startingLoads';
 
 export type { Level };
@@ -421,12 +421,13 @@ function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: stri
       const kg = nearestSize(target, sizes.length ? sizes : [KETTLEBELL_SIZES[0]]);
       return out(kg, type === 'kb2' ? `${kg} kg each` : `${kg} kg`);
     }
+    // Bars take plates in pairs, so totals move in 5 kg steps
     case 'barbell':
-      return out(capAt(Math.max(BAR_KG, roundTo(target, 2.5)), plates !== undefined ? plates + BAR_KG : undefined));
+      return out(capAt(Math.max(BAR_KG, roundTo(target, BAR_STEP_KG)), plates !== undefined ? roundTo(plates + BAR_KG, BAR_STEP_KG) : undefined));
     case 'ez':
-      return out(capAt(Math.max(EZ_BAR_KG, roundTo(target, 2.5)), plates !== undefined ? plates + EZ_BAR_KG : undefined));
+      return out(capAt(Math.max(EZ_BAR_KG, roundTo(target, BAR_STEP_KG)), plates !== undefined ? roundTo(plates + EZ_BAR_KG, BAR_STEP_KG) : undefined));
     case 'smith':
-      return out(Math.max(SMITH_MIN_KG, roundTo(target, 2.5)));
+      return out(Math.max(SMITH_MIN_KG, roundTo(target, BAR_STEP_KG)));
     case 'stack':
       return out(Math.max(MACHINE_STEP_KG, roundTo(target, MACHINE_STEP_KG)));
     case 'sled':

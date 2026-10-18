@@ -44,7 +44,7 @@ import { findExercise } from '../constants/exerciseCatalog';
 import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
 import { WheelPicker } from '../components/WheelPicker';
 import { weightStepsFor } from '../constants/equipment';
-import { closestOnLadder, stepFrom } from '../constants/startingLoads';
+import { closestOnLadder, stepsAway } from '../constants/startingLoads';
 import { getLoadFeedback, saveLoadFeedback, Vote } from '../utils/loadFeedback';
 import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useTheme } from '../contexts/ThemeContext';
@@ -511,24 +511,55 @@ function MuscleGroupAccordion({
 // ─────────────────────────────────────────────────────────────────────────────
 // Exercise Log Card (Log tab)
 // ─────────────────────────────────────────────────────────────────────────────
-const SET_ITEMS = Array.from({ length: 10 }, (_, i) => String(i + 1));
 const REP_ITEMS = Array.from({ length: 100 }, (_, i) => String(i + 1));
 
-function FeedbackOption({ icon, color, title, sub, primary, onPress }: {
-  icon: keyof typeof Ionicons.glyphMap; color: string; title: string; sub: string; primary?: boolean; onPress: () => void;
+/** The pop-up after "Felt strong" / "Too heavy": how many kg to go up or down next session. */
+function WeightChange({ up, usedKg, options, onPick }: {
+  up: boolean; usedKg: number; options: number[]; onPick: (kg: number) => void;
 }) {
   const { C } = useTheme();
   const styles = makeStyles(C);
+  const color = up ? C.green : C.red;
+  const [sel, setSel] = useState<number>(options[0] ?? usedKg);
+  const fmt = (n: number) => `${+n.toFixed(2)}`;
   return (
-    <TouchableOpacity style={[styles.fbOption, primary && { borderColor: color, backgroundColor: color + '14' }]}
-      onPress={onPress} activeOpacity={0.85}>
-      <Ionicons name={icon} size={20} color={color} />
-      <View style={{ flex: 1 }}>
-        <Text style={styles.fbOptionTitle}>{title}</Text>
-        <Text style={styles.fbOptionSub}>{sub}</Text>
+    <View>
+      <View style={[styles.fbIcon, { backgroundColor: color + '1F' }]}>
+        <Ionicons name={up ? 'thumbs-up' : 'thumbs-down'} size={28} color={color} />
       </View>
-      <Ionicons name="chevron-forward" size={16} color={C.muted} />
-    </TouchableOpacity>
+      <Text style={styles.fbText}>
+        {up ? `You hit your sets at ${usedKg} kg. How many kilos can you go up next time?`
+          : `No problem, that's part of training. How many kilos should you drop to keep good form?`}
+      </Text>
+      {options.length > 0 ? (
+        <View style={styles.fbChips}>
+          {options.map(kg => {
+            const on = sel === kg;
+            return (
+              <TouchableOpacity key={kg} onPress={() => setSel(kg)} activeOpacity={0.85}
+                style={[styles.fbChip, on && { backgroundColor: color, borderColor: color }]}>
+                <Text style={[styles.fbChipDelta, { color: on ? '#FFFFFF' : color }]}>
+                  {up ? '+' : '−'}{fmt(Math.abs(kg - usedKg))} kg
+                </Text>
+                <Text style={[styles.fbChipTo, on && { color: '#FFFFFFCC' }]}>→ {kg} kg</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={[styles.fbText, { marginBottom: 12 }]}>
+          {up ? "You're already at the heaviest weight." : "You're already at the lightest weight."}
+        </Text>
+      )}
+      {options.length > 0 && (
+        <TouchableOpacity style={[styles.fbSave, { backgroundColor: color }]} onPress={() => onPick(sel)} activeOpacity={0.85}>
+          <Text style={styles.fbSaveText}>{up ? 'Go up' : 'Go down'} to {sel} kg</Text>
+        </TouchableOpacity>
+      )}
+      <TouchableOpacity style={styles.fbStay} onPress={() => onPick(usedKg)} activeOpacity={0.7}>
+        <Text style={styles.fbStayText}>{up ? 'Stay' : 'Keep'} at {usedKg} kg</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -558,7 +589,11 @@ function ExerciseLogCard({
     const fb = getLoadFeedback(name);
     return t && t.kg !== undefined && fb && fb.date < todayStr() ? withKg(t, fb.kg) : t;
   });
-  const [sets, setSets] = useState(1);
+  // Sets go one at a time: the counter moves on by itself after each log
+  const doneSets = loggedSets.reduce((n, s) => n + (s.sets || 1), 0);
+  const goalSets = target?.sets;
+  const [extraSet, setExtraSet] = useState(false);  // "One more set" after the goal is done
+  const allDone = goalSets !== undefined && doneSets >= goalSets && !extraSet;
   // Start the reps at the bottom of the target range ('8–12' → 8); timed holds keep the default
   const [reps, setReps] = useState(() => Number(target?.reps.match(/^(\d+)(?:–\d+)?$/)?.[1] ?? 8));
   // The recommended weight is on the wheel, ready to log or scroll to change: the latest feedback,
@@ -567,12 +602,15 @@ function ExerciseLogCard({
     closestOnLadder(getLoadFeedback(name)?.kg ?? target?.kg ?? getLastWeight(name) ?? 20, steps));
   const [vote, setVote] = useState<Vote | null>(null);  // the pop-up being shown
 
-  const handleLog = () => onLog(sets, reps, repsOnly ? 0 : kg);
+  const handleLog = () => {
+    onLog(1, reps, repsOnly ? 0 : kg);
+    setExtraSet(false);
+  };
 
   // Feedback is about the heaviest weight used today
   const usedKg = loggedSets.reduce((m, s) => Math.max(m, s.weight), 0) || kg;
-  const lighter = stepFrom(usedKg, steps, -1);
-  const heavier = stepFrom(usedKg, steps, 1);
+  const heavier = stepsAway(usedKg, steps, 1, 4);   // dumbbells +2.5, +5...; bars and machines +5, +10...
+  const lighter = stepsAway(usedKg, steps, -1, 4);
   const votedToday = feedback && feedback.date === todayStr() ? feedback.vote : null;
   const choose = (v: Vote, nextKg: number) => {
     setFeedback(saveLoadFeedback(name, v, nextKg));
@@ -629,25 +667,12 @@ function ExerciseLogCard({
         )}
 
         {loggedSets.length > 0 && (
-          <View style={{ marginBottom: 16 }}>
-            {!repsOnly && (
-              <View style={styles.rateRow}>
-                <Text style={styles.rateLabel}>How did it go?</Text>
-                <TouchableOpacity
-                  style={[styles.rateBtn, votedToday === 'up' && { backgroundColor: C.green + '22', borderColor: C.green }]}
-                  onPress={() => setVote('up')} hitSlop={6} activeOpacity={0.8}>
-                  <Ionicons name={votedToday === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} size={18} color={C.green} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.rateBtn, votedToday === 'down' && { backgroundColor: C.red + '22', borderColor: C.red }]}
-                  onPress={() => setVote('down')} hitSlop={6} activeOpacity={0.8}>
-                  <Ionicons name={votedToday === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} size={18} color={C.red} />
-                </TouchableOpacity>
-              </View>
-            )}
+          <View style={{ marginBottom: 14 }}>
             {loggedSets.map((s, i) => (
-              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: muscleColor, marginRight: 8 }} />
+              <View key={i} style={styles.doneRow}>
+                <View style={[styles.doneTick, { backgroundColor: muscleColor + '22' }]}>
+                  <Ionicons name="checkmark" size={13} color={muscleColor} />
+                </View>
                 <Text style={{ color: C.text, fontSize: 14 }}>
                   Set {i + 1}:  <Text style={{ fontWeight: '700' }}>{s.reps}</Text> reps
                   {!repsOnly && <> @ <Text style={{ fontWeight: '700' }}>{s.weight}</Text> kg</>}
@@ -657,62 +682,89 @@ function ExerciseLogCard({
           </View>
         )}
 
-        {/* Scroll wheels, set to the recommendation */}
-        <View style={styles.wheelCard}>
-          <View style={styles.wheelCol}>
-            <Text style={styles.setsLabel}>Sets</Text>
-            <WheelPicker items={SET_ITEMS} width={48} index={sets - 1} onChange={i => setSets(i + 1)} />
+        {allDone ? (
+          <View style={styles.allDone}>
+            <Ionicons name="checkmark-circle" size={20} color={C.green} />
+            <Text style={styles.allDoneText}>All {goalSets} sets done</Text>
           </View>
-          <View style={styles.wheelCol}>
-            <Text style={styles.setsLabel}>Reps</Text>
-            <WheelPicker items={REP_ITEMS} width={56} index={reps - 1} onChange={i => setReps(i + 1)} />
-          </View>
-          {!repsOnly && (
-            <View style={[styles.wheelCol, { flex: 1.3 }]}>
-              <Text style={styles.setsLabel}>Weight (kg)</Text>
-              <WheelPicker items={steps.map(String)} width={72} index={Math.max(0, steps.indexOf(kg))}
-                onChange={i => setKg(steps[i])} />
+        ) : (
+          <>
+            {/* The set number is fixed; reps and weight are scroll wheels set to the recommendation */}
+            <View style={styles.wheelCard}>
+              <View style={styles.wheelCol}>
+                <Text style={styles.setsLabel}>Set</Text>
+                <View style={styles.setNow}>
+                  <Text style={styles.setNowNum}>{doneSets + 1}</Text>
+                  {goalSets !== undefined && doneSets < goalSets && <Text style={styles.setNowOf}>of {goalSets}</Text>}
+                  {extraSet && <Text style={styles.setNowOf}>extra</Text>}
+                </View>
+              </View>
+              <View style={styles.wheelCol}>
+                <Text style={styles.setsLabel}>Reps</Text>
+                <WheelPicker items={REP_ITEMS} width={56} index={reps - 1} onChange={i => setReps(i + 1)} />
+              </View>
+              {!repsOnly && (
+                <View style={[styles.wheelCol, { flex: 1.3 }]}>
+                  <Text style={styles.setsLabel}>Weight (kg)</Text>
+                  <WheelPicker items={steps.map(String)} width={72} index={Math.max(0, steps.indexOf(kg))}
+                    onChange={i => setKg(steps[i])} />
+                </View>
+              )}
             </View>
+          </>
+        )}
+
+        <View style={{ marginTop: 14, flexDirection: 'row', gap: 10 }}>
+          {!allDone && (
+            <View style={{ flex: 1 }}>
+              <Btn label={`Log set ${doneSets + 1}`} color={muscleColor} onPress={handleLog} small />
+            </View>
+          )}
+          {/* Once the goal is met (or with no goal), another set can always be added */}
+          {doneSets > 0 && !extraSet && (allDone || goalSets === undefined) && (
+            <TouchableOpacity style={[styles.moreSetBtn, { borderColor: muscleColor }, allDone && { flex: 1 }]}
+              onPress={() => setExtraSet(true)} activeOpacity={0.85}>
+              <Ionicons name="add" size={16} color={muscleColor} />
+              <Text style={[styles.moreSetText, { color: muscleColor }]}>One more set</Text>
+            </TouchableOpacity>
           )}
         </View>
 
-        <View style={{ marginTop: 16 }}>
-          <Btn label="+ Log Set" color={muscleColor} onPress={handleLog} small />
-        </View>
+        {/* How did it feel → the weight for next time */}
+        {loggedSets.length > 0 && !repsOnly && (
+          <View style={styles.rateCard}>
+            <Text style={styles.rateLabel}>How did it feel?</Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {([
+                { v: 'up' as Vote, icon: 'thumbs-up', label: 'Felt strong', color: C.green },
+                { v: 'down' as Vote, icon: 'thumbs-down', label: 'Too heavy', color: C.red },
+              ] as const).map(o => {
+                const on = votedToday === o.v;
+                return (
+                  <TouchableOpacity key={o.v} activeOpacity={0.85} onPress={() => setVote(o.v)}
+                    style={[styles.rateBtn, on ? { backgroundColor: o.color, borderColor: o.color } : { borderColor: o.color + '55' }]}>
+                    <View style={[styles.rateIcon, { backgroundColor: on ? '#FFFFFF33' : o.color + '1F' }]}>
+                      <Ionicons name={o.icon} size={16} color={on ? '#FFFFFF' : o.color} />
+                    </View>
+                    <Text style={[styles.rateBtnText, { color: on ? '#FFFFFF' : C.text }]}>{o.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {votedToday && feedback && (
+              <Text style={styles.rateNote}>Next session starts at {feedback.kg} kg</Text>
+            )}
+          </View>
+        )}
       </View>
 
-      {/* 👍 / 👎 → the weight for next time */}
-      <NeuModal visible={vote !== null} title={vote === 'up' ? 'Great lift!' : 'Too heavy today?'} onClose={() => setVote(null)}>
-        <View style={[styles.fbIcon, { backgroundColor: (vote === 'up' ? C.green : C.red) + '1F' }]}>
-          <Ionicons name={vote === 'up' ? 'thumbs-up' : 'thumbs-down'} size={30} color={vote === 'up' ? C.green : C.red} />
-        </View>
-        <Text style={styles.fbText}>
-          {vote === 'up'
-            ? `You did your sets at ${usedKg} kg. What should next session start at?`
-            : `No problem, that's part of training. Drop the weight and keep good form.`}
-        </Text>
-        {vote === 'up' ? (
-          <>
-            {heavier !== usedKg && (
-              <FeedbackOption icon="trending-up" color={C.green} primary
-                title={`Go up to ${heavier} kg`} sub="It felt good. Add a little weight next time."
-                onPress={() => choose('up', heavier)} />
-            )}
-            <FeedbackOption icon="remove" color={C.accent}
-              title={`Stay at ${usedKg} kg`} sub="Repeat it and aim for more reps."
-              onPress={() => choose('up', usedKg)} />
-          </>
-        ) : (
-          <>
-            {lighter !== usedKg && (
-              <FeedbackOption icon="trending-down" color={C.red} primary
-                title={`Lower to ${lighter} kg`} sub="Used for the rest of today's sets and next session."
-                onPress={() => choose('down', lighter)} />
-            )}
-            <FeedbackOption icon="refresh" color={C.accent}
-              title={`Keep ${usedKg} kg`} sub="Try the same weight again next time."
-              onPress={() => choose('down', usedKg)} />
-          </>
+      {/* Felt strong / too heavy → how much to change the weight */}
+      <NeuModal visible={vote !== null} title={vote === 'up' ? 'Nice lift!' : 'Too heavy today?'} onClose={() => setVote(null)}>
+        {vote && (
+          <WeightChange
+            up={vote === 'up'} usedKg={usedKg} options={vote === 'up' ? heavier : lighter}
+            onPick={nextKg => choose(vote, nextKg)}
+          />
         )}
       </NeuModal>
     </Card>
@@ -1688,20 +1740,43 @@ function makeStyles(C: any) { return StyleSheet.create({
     backgroundColor: C.bg, borderRadius: 16, borderWidth: 1, borderColor: C.border,
   },
   wheelCol: { flex: 1, alignItems: 'center' },
-  rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  rateLabel: { flex: 1, fontSize: 12, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  rateBtn: {
-    width: 38, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.bg, borderWidth: 1, borderColor: C.border,
+  setNow: { height: 102, alignItems: 'center', justifyContent: 'center' },
+  setNowNum: { fontSize: 30, fontWeight: '800', color: C.text },
+  setNowOf: { fontSize: 11, fontWeight: '700', color: C.muted, marginTop: -2 },
+  doneRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  doneTick: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  allDone: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14,
+    backgroundColor: C.green + '14', borderRadius: 16, borderWidth: 1, borderColor: C.green + '44',
   },
+  allDoneText: { fontSize: 15, fontWeight: '800', color: C.green },
+  moreSetBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    paddingHorizontal: 14, borderRadius: 12, borderWidth: 1.5, minHeight: 40,
+  },
+  moreSetText: { fontSize: 14, fontWeight: '800' },
+  rateCard: { marginTop: 14, padding: 12, backgroundColor: C.bg, borderRadius: 16, borderWidth: 1, borderColor: C.border },
+  rateLabel: { fontSize: 11, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
+  rateBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 10, borderRadius: 14, borderWidth: 1.5, backgroundColor: C.card,
+  },
+  rateIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  rateBtnText: { fontSize: 14, fontWeight: '800' },
+  rateNote: { fontSize: 12, fontWeight: '600', color: C.textSub, textAlign: 'center', marginTop: 10 },
   fbIcon: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
   fbText: { fontSize: 14, color: C.textSub, textAlign: 'center', lineHeight: 20, marginBottom: 16, paddingHorizontal: 8 },
-  fbOption: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 10,
-    backgroundColor: C.bg, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+  fbChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  fbChip: {
+    flexGrow: 1, flexBasis: '45%', alignItems: 'center', paddingVertical: 12,
+    backgroundColor: C.bg, borderRadius: 14, borderWidth: 1.5, borderColor: C.border,
   },
-  fbOptionTitle: { fontSize: 15, fontWeight: '800', color: C.text },
-  fbOptionSub: { fontSize: 12, color: C.muted, marginTop: 2 },
+  fbChipDelta: { fontSize: 17, fontWeight: '800' },
+  fbChipTo: { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 2 },
+  fbSave: { borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  fbSaveText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+  fbStay: { paddingVertical: 14, alignItems: 'center' },
+  fbStayText: { fontSize: 14, fontWeight: '700', color: C.muted },
   exRow: {
     flexDirection: 'row',
     alignItems: 'center',

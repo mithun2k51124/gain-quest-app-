@@ -120,6 +120,8 @@ function loadTypeOf(name: string): LoadType | 'free' {
   if (req.includes('kettlebell') || has(/kettlebell/i)) return 'kb';
   if (req.includes('cable') || req.includes('machines') || has(/cable|machine|pulldown|pushdown|leg press|leg curl|leg extension|pec deck/i)) return 'stack';
   if (req.some(i => i === 'barbell' || i === 'ez_bar' || i === 'smith') || has(/barbell|ez.?bar|smith/i)) return 'barbell';
+  // The classic lifts are barbell lifts unless named otherwise ('Bench Press', 'Deadlift'...)
+  if (!req.length && has(/bench press|deadlift|squat|overhead press|military press|bent.?over row|hip thrust|good morning/i)) return 'barbell';
   if (req.includes('med_ball')) return 'medball';
   return 'free';
 }

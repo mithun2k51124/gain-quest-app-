@@ -196,6 +196,8 @@ export const EZ_BAR_KG = 10;
 export const SMITH_MIN_KG = 15;
 /** Machine weight stacks and plate-loaded machines move in 5 kg steps. */
 export const MACHINE_STEP_KG = 5;
+/** Barbells, EZ bars and Smith machines: a pair of plates, so 5 kg steps (20, 25, 30 ...). */
+export const BAR_STEP_KG = 5;
 
 /** Every weight that can be picked for an implement: what the Log tab's weight wheel offers. */
 export function weightLadder(type: LoadType | 'free'): number[] {
@@ -203,8 +205,8 @@ export function weightLadder(type: LoadType | 'free'): number[] {
     case 'db': case 'db1': return DUMBBELL_SIZES;
     case 'kb': case 'kb2': return KETTLEBELL_SIZES;
     case 'stack': case 'sled': return ladder(5, 300, MACHINE_STEP_KG);
-    // Bars are loaded with plates, so they move in 2.5 kg steps
-    case 'barbell': case 'ez': case 'smith': return ladder(2.5, 300, 2.5);
+    // Bars only take plates in pairs (2.5 kg a side at least), so they move in 5 kg steps
+    case 'barbell': case 'ez': case 'smith': return ladder(5, 300, BAR_STEP_KG);
     case 'plate': return PLATE_SIZES;
     case 'medball': return MEDBALL_SIZES;
     case 'added': return ladder(0, 100, 2.5);
@@ -217,8 +219,10 @@ export function closestOnLadder(kg: number, steps: number[]): number {
   return steps.reduce((best, s) => (Math.abs(s - kg) < Math.abs(best - kg) ? s : best), steps[0]);
 }
 
-/** One step heavier or lighter on the ladder (stays put at either end). */
-export function stepFrom(kg: number, steps: number[], dir: 1 | -1): number {
+/** Up to n weights heavier (dir 1) or lighter (dir -1) than kg on the ladder, nearest first. */
+export function stepsAway(kg: number, steps: number[], dir: 1 | -1, n: number): number[] {
   const i = steps.indexOf(closestOnLadder(kg, steps));
-  return steps[Math.max(0, Math.min(steps.length - 1, i + dir))];
+  const out: number[] = [];
+  for (let j = i + dir; j >= 0 && j < steps.length && out.length < n; j += dir) out.push(steps[j]);
+  return out;
 }
