@@ -18,10 +18,14 @@
 import CATALOG from '../constants/exerciseCatalog.json';
 import {
   EquipmentAnswers, EquipmentId, HOME_ITEMS, ownedItems, canDo, primaryItem, missingItems, countAvailable,
+  DUMBBELL_KG, KETTLEBELL_KG, PLATES_KG,
 } from '../constants/equipment';
 import {
   Candidate, Level, PatternKey, SkillKey, PATTERNS, POOLS, SKILL_ORDER,
 } from '../constants/exercisePools';
+import {
+  LOADS, KETTLEBELL_SIZES, PLATE_SIZES, MEDBALL_SIZES, BAR_KG, EZ_BAR_KG, SMITH_MIN_KG,
+} from '../constants/startingLoads';
 
 export type { Level };
 
@@ -51,6 +55,7 @@ export interface SplitAnswers {
   strength?: StrengthAnswers;    // missing → defaults for the level
   skills?: SkillKey[];           // technique lifts done before
   block?: number;                // 0 = first block; exercises rotate each block
+  bodyweightKg?: number;         // for starting weights; missing → DEFAULT_BODYWEIGHT_KG
 }
 
 export interface ExerciseChoice {
@@ -58,7 +63,11 @@ export interface ExerciseChoice {
   muscle: string;           // EXERCISE_LIBRARY key (Chest, Back, Legs, ...)
   sets: number;
   reps: string;
+  load: string;             // starting weight: '10 kg each', 'Bodyweight', 'Medium band'
+  kg?: number;              // the number in load, when there is one (for the log screen)
 }
+
+export const DEFAULT_BODYWEIGHT_KG = 70;
 
 export interface PlannedExercise extends ExerciseChoice {
   compound: boolean;
@@ -91,7 +100,7 @@ export interface SplitPlan {
 
 export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday first
-export const ROTATE_OPTIONS = [3, 4, 6];        // weeks per block
+export const ROTATE_OPTIONS = [1, 2, 3, 4];     // weeks per block
 export const DEFAULT_ROTATE_WEEKS = 4;
 
 /** Rest days that spread training evenly through the week. */
@@ -245,6 +254,9 @@ interface Ctx {
   block: number;
   light: Record<string, boolean>;   // equipment whose heaviest weight is light for this lifter
   ranked: Map<PatternKey, Candidate[]>;
+  bodyweight: number;
+  // Heaviest weights a home user has (kg); undefined = no limit (gym, or the "or more" answer)
+  caps: { dumbbell?: number; kettlebell?: number; plates?: number };
 }
 
 function makeCtx(a: SplitAnswers): Ctx {
@@ -263,8 +275,18 @@ function makeCtx(a: SplitAnswers): Ctx {
       barbell: eq?.plateTotalKg !== undefined && eq.plateTotalKg <= (rank === 2 ? 50 : rank === 1 ? 20 : 0),
     },
     ranked: new Map(),
+    bodyweight: Math.min(150, Math.max(40, a.bodyweightKg || DEFAULT_BODYWEIGHT_KG)),
+    caps: eq?.place === 'home' ? {
+      dumbbell: below(eq.dumbbellMaxKg, DUMBBELL_KG),
+      kettlebell: below(eq.kettlebellMaxKg, KETTLEBELL_KG),
+      plates: below(eq.plateTotalKg, PLATES_KG),
+    } : {},
   };
 }
+
+/** A home weight answer as a limit, unless it's the last ("or more") option. */
+const below = (kg: number | undefined, options: number[]) =>
+  kg !== undefined && kg < options[options.length - 1] ? kg : undefined;
 
 /** The user's level on the scale a bodyweight candidate is measured on, or null. */
 function ability(c: Candidate, ctx: Ctx): { have: number; need: number } | null {
@@ -351,14 +373,86 @@ function pullUpReps(have: number, gap: number): string {
   return '1–3';
 }
 
+// ── Starting weights ────────────────────────────────────────────────────────
+
+const LEVEL_LOAD: Record<Level, number> = { beginner: 1, intermediate: 1.35, advanced: 1.7 };
+const PUSH_PATTERNS = new Set<PatternKey>(['hPush', 'inclinePush', 'chestFly', 'vPush', 'lateral', 'triceps']);
+const PULL_PATTERNS = new Set<PatternKey>(['hPull', 'vPull', 'rearDelt', 'biceps']);
+const BAND_LABEL: Record<Level, string> = { beginner: 'Light band', intermediate: 'Medium band', advanced: 'Heavy band' };
+
+/** The strength check scaled around 1: stronger answers start a little heavier. */
+function strengthFactor(pattern: PatternKey, ctx: Ctx): number {
+  if (PUSH_PATTERNS.has(pattern)) return 0.8 + 0.1 * ctx.strength.push;    // 0.8 – 1.2
+  if (PULL_PATTERNS.has(pattern)) return 0.85 + 0.1 * ctx.strength.pull;   // 0.85 – 1.15
+  if (PATTERNS[pattern].lower) return 0.85 + 0.1 * ctx.strength.squat;     // 0.85 – 1.15
+  return 1;
+}
+
+const roundTo = (kg: number, step: number) => Math.round(kg / step) * step;
+/** The largest size that isn't much heavier than the target (the smallest if all are). */
+const nearestSize = (kg: number, sizes: number[]) =>
+  sizes.filter(s => s <= kg * 1.1).pop() ?? sizes[0];
+const capAt = (kg: number, cap?: number) => (cap !== undefined ? Math.min(kg, cap) : kg);
+
+/** How heavy to start an exercise, as a label for the plan and a number for the log screen. */
+function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: string; kg?: number } {
+  const entry = LOADS[name];
+  if (!entry || entry[0] === 'bw') {
+    return { load: primaryItem(name) === 'bands' ? BAND_LABEL[ctx.level] : 'Bodyweight' };
+  }
+  const [type, ratio] = entry;
+  const target = ctx.bodyweight * ratio * LEVEL_LOAD[ctx.level] * strengthFactor(pattern, ctx);
+  const { dumbbell, kettlebell, plates } = ctx.caps;
+  const out = (kg: number, label = `${kg} kg`) => ({ load: label, kg });
+  switch (type) {
+    case 'db':
+    case 'db1': {
+      // Light dumbbells go up in 1 kg steps, heavier ones in 2.5 kg
+      const kg = capAt(target < 10 ? Math.max(1, Math.round(target)) : roundTo(target, 2.5), dumbbell);
+      return out(kg, type === 'db' ? `${kg} kg each` : `${kg} kg`);
+    }
+    case 'kb':
+    case 'kb2': {
+      const sizes = KETTLEBELL_SIZES.filter(s => kettlebell === undefined || s <= kettlebell);
+      const kg = nearestSize(target, sizes.length ? sizes : [KETTLEBELL_SIZES[0]]);
+      return out(kg, type === 'kb2' ? `${kg} kg each` : `${kg} kg`);
+    }
+    case 'barbell':
+      return out(capAt(Math.max(BAR_KG, roundTo(target, 2.5)), plates !== undefined ? plates + BAR_KG : undefined));
+    case 'ez':
+      return out(capAt(Math.max(EZ_BAR_KG, roundTo(target, 2.5)), plates !== undefined ? plates + EZ_BAR_KG : undefined));
+    case 'smith':
+      return out(Math.max(SMITH_MIN_KG, roundTo(target, 2.5)));
+    case 'stack':
+      return out(Math.max(2.5, roundTo(target, 2.5)));
+    case 'sled':
+      return out(Math.max(10, roundTo(target, 5)));
+    case 'plate': {
+      const kg = nearestSize(target, PLATE_SIZES);
+      return out(kg, `${kg} kg plate`);
+    }
+    case 'medball': {
+      const kg = nearestSize(target, MEDBALL_SIZES);
+      return out(kg, `${kg} kg ball`);
+    }
+    case 'added': {
+      const kg = roundTo(target, 2.5);
+      return kg > 0 ? out(kg, `+${kg} kg`) : { load: 'Bodyweight' };
+    }
+  }
+  return { load: 'Bodyweight' };
+}
+
 function choice(c: Candidate, pattern: PatternKey, ctx: Ctx): ExerciseChoice {
   const { compound, muscle } = PATTERNS[pattern];
   const base = dose(ctx.level, compound);
+  const start = startingLoad(c.name, pattern, ctx);
   const out = (reps: string): ExerciseChoice => ({
     name: c.name,
     muscle: muscle === 'Core' ? 'Core' : GROUP.get(c.name) ?? muscle,
     sets: base.sets,
     reps,
+    ...start,
   });
   if (c.reps) return out(c.reps);
   const ab = ability(c, ctx);

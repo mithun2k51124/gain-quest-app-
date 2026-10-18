@@ -1,45 +1,64 @@
 // components/SplitWizard.tsx — a few quick questions → a personalised weekly split.
-// Asks experience, time, days and rest days, then where the user trains (and with what), a quick
-// strength check and which technique lifts they've done. Plans run in blocks of a few weeks; when a
-// block ends, a short re-test builds the next block with fresh exercises.
+// Asks experience, time, days and rest days, then where the user trains and what equipment they
+// have, a quick strength check (with bodyweight, for starting weights) and which technique lifts
+// they've done. Plans run in blocks of a few weeks; when a block ends, a short re-test builds the
+// next block with fresh exercises.
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, AppState } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, AppState, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
-import { getSetting, setSetting, replaceWeeklyPlan, todayStr } from '../db/database';
+import { getSetting, setSetting, replaceWeeklyPlan, todayStr, getLatestWeight } from '../db/database';
 import {
   generateSplit, defaultRestDays, exercisesPerSession, strengthDefaults, skillOptions, blockProgress,
   RECOMMENDED_DAYS, WEEK_ORDER, DAY_NAMES, PUSH_OPTIONS, PULL_OPTIONS, SQUAT_OPTIONS,
-  ROTATE_OPTIONS, DEFAULT_ROTATE_WEEKS,
+  ROTATE_OPTIONS, DEFAULT_ROTATE_WEEKS, DEFAULT_BODYWEIGHT_KG,
   Level, SplitAnswers, StrengthAnswers, PlannedDay, ExerciseChoice,
 } from '../utils/splitGenerator';
 import {
-  EquipmentAnswers, EquipmentId, Place, EQUIPMENT_LABEL, HOME_ITEMS, MORE_ITEMS, GYM_ITEMS, GYM_CHECKLIST,
+  EquipmentAnswers, EquipmentId, Place, EQUIPMENT_LABEL, MORE_ITEMS, GYM_GROUPS, HOME_GROUPS, GYM_ALL,
   DUMBBELL_KG, KETTLEBELL_KG, PLATES_KG, ownedItems, countAvailable,
 } from '../constants/equipment';
 import { SkillKey, SKILL_LABEL } from '../constants/exercisePools';
 import { ExerciseGuideButton } from './ExerciseGuide';
 import { logError } from '../utils/logError';
 
+/** What the split builder set for one exercise on one day. */
+export interface ExerciseTarget {
+  sets: number;
+  reps: string;
+  load?: string;   // starting weight, e.g. '10 kg each' or 'Bodyweight'
+  kg?: number;     // the number in load, when there is one
+}
+
 export interface SplitConfig extends SplitAnswers {
   name: string;
   prescription: string;
   blockStart?: string;              // local YYYY-MM-DD the current block started
   rotateWeeks?: number;             // new exercises every N weeks
-  doses?: Record<string, string>;   // doseKey(day, exercise) → '3 × 8–12', shown in the planner
+  targets?: Record<string, ExerciseTarget>;  // targetKey(day, exercise) → sets, reps, starting weight
+  doses?: Record<string, string>;   // older splits: '3 × 8–12' by targetKey or by exercise name
 }
 
-// The same exercise can get a different dose on different days, so doses are stored per day
-const doseKey = (day: string, exercise: string) => `${day}|${exercise}`;
+// The same exercise can get a different target on different days, so targets are stored per day
+const targetKey = (day: string, exercise: string) => `${day}|${exercise}`;
 
-/** Sets × reps the split builder picked for an exercise on a planner day ('Monday'). */
-export function doseFor(cfg: SplitConfig | null, day: string, exercise: string): string | undefined {
-  // Splits saved before doses were stored per day used the bare exercise name
-  return cfg?.doses?.[doseKey(day, exercise)] ?? cfg?.doses?.[exercise];
+/** What the split builder set for an exercise on a planner day ('Monday'), if anything. */
+export function targetFor(cfg: SplitConfig | null, day: string, exercise: string): ExerciseTarget | null {
+  const t = cfg?.targets?.[targetKey(day, exercise)];
+  if (t) return t;
+  // Splits saved before starting weights only stored sets × reps
+  const dose = cfg?.doses?.[targetKey(day, exercise)] ?? cfg?.doses?.[exercise];
+  const m = dose?.match(/^(\d+) × (.+)$/);
+  return m ? { sets: Number(m[1]), reps: m[2] } : null;
 }
 
-type StepKey = 'level' | 'place' | 'strength' | 'skills' | 'minutes' | 'days' | 'rest' | 'plan';
+/** '3 × 8–12 · 10 kg each' */
+export function targetText(t: ExerciseTarget): string {
+  return `${t.sets} × ${t.reps}${t.load ? ` · ${t.load}` : ''}`;
+}
+
+type StepKey = 'level' | 'place' | 'equipment' | 'strength' | 'skills' | 'minutes' | 'days' | 'rest' | 'plan';
 type Icon = keyof typeof Ionicons.glyphMap;
 
 const SETTING_KEY = 'split_config';
@@ -50,15 +69,15 @@ const LEVELS: { key: Level; title: string; sub: string; icon: string }[] = [
   { key: 'advanced', title: 'Pro', sub: '3+ years, comfortable with heavy lifts', icon: 'flame-outline' },
 ];
 const PLACES: { key: Place; title: string; sub: string; icon: Icon }[] = [
-  { key: 'gym', title: 'Gym', sub: 'Machines, cables and free weights', icon: 'barbell-outline' },
-  { key: 'home', title: 'Home', sub: 'I have some equipment', icon: 'home-outline' },
+  { key: 'gym', title: 'Gym', sub: 'Next, tick what your gym has', icon: 'barbell-outline' },
+  { key: 'home', title: 'Home', sub: 'Next, tick what you have at home', icon: 'home-outline' },
   { key: 'bodyweight', title: 'No equipment', sub: 'Bodyweight only, anywhere', icon: 'body-outline' },
 ];
 const PLACE_LABEL: Record<Place, string> = { gym: 'Gym', home: 'Home', bodyweight: 'Bodyweight' };
 const MINUTES = [30, 45, 60, 75, 90];
 const DAYS = [2, 3, 4, 5, 6];
 const LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-// Unticking an item also clears its follow-up answers
+// At home, unticking an item also clears its follow-up answers
 const DEPENDENTS: Partial<Record<EquipmentId, EquipmentId[]>> = {
   barbell: ['rack', 'ez_bar'], bench: ['adj_bench'], kettlebell: ['kettlebell_pair'],
 };
@@ -66,6 +85,18 @@ const PLURAL = new Set<EquipmentId>(['dumbbells', 'bands', 'dip_bars', 'rings', 
 // Muscle-group chips in the planner use 'Upper Back'; the exercise library uses 'Back'
 const toPlannerGroup = (m: string) => (m === 'Back' ? 'Upper Back' : m);
 const kg = (list: number[]) => list.map((v, i) => `${v}${i === list.length - 1 ? '+' : ''} kg`);
+/** A typed bodyweight in kg, or undefined if it isn't a believable number. */
+const parseBodyweight = (s: string) => {
+  const n = parseFloat(s.replace(',', '.'));
+  return n >= 30 && n <= 250 ? n : undefined;
+};
+/** Starting value for the bodyweight box: the latest logged weight, else what's on file. */
+function knownBodyweight(cfg: SplitConfig | null): string {
+  let n: number | null | undefined = null;
+  try { n = getLatestWeight(); } catch (e) { logError('splitBodyweight', e); }
+  n = n || cfg?.bodyweightKg || parseFloat(getSetting('body_weight', '')) || undefined;
+  return n ? String(Math.round(n * 10) / 10) : '';
+}
 
 /** 'a pull-up bar', 'an exercise ball', 'dumbbells' */
 function itemPhrase(id: EquipmentId): string {
@@ -105,9 +136,9 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
   const [step, setStep] = useState(0);
   const [nextBlock, setNextBlock] = useState(false);
   const [level, setLevel] = useState<Level>('beginner');
-  const [equipment, setEquipment] = useState<EquipmentAnswers>({ place: 'gym', items: [...GYM_ITEMS] });
-  const [editGym, setEditGym] = useState(false);
+  const [equipment, setEquipment] = useState<EquipmentAnswers>({ place: 'gym', items: [] });
   const [showMore, setShowMore] = useState(false);
+  const [bodyweight, setBodyweight] = useState('');
   const [strength, setStrength] = useState<StrengthAnswers>(strengthDefaults('beginner'));
   const [strengthSet, setStrengthSet] = useState(false);
   const [skills, setSkills] = useState<SkillKey[]>([]);
@@ -116,7 +147,7 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
   const [restDays, setRestDays] = useState<number[]>(defaultRestDays(3));
   const [rotateWeeks, setRotateWeeks] = useState(DEFAULT_ROTATE_WEEKS);
   const [block, setBlock] = useState(0);
-  const [openDay, setOpenDay] = useState<number | null>(null);
+  const [openDays, setOpenDays] = useState<Set<number>>(new Set());
   const [swaps, setSwaps] = useState<Record<string, number>>({});
 
   // Start from the current split's answers when changing it or starting its next block
@@ -126,7 +157,7 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
     const next = mode === 'next' && !!cfg?.equipment;
     const lvl = cfg?.level ?? level;
     setStep(0);
-    setOpenDay(null);
+    setOpenDays(new Set());
     setShowMore(false);
     setNextBlock(next);
     setBlock(next ? (cfg?.block ?? 0) + 1 : 0);
@@ -139,11 +170,12 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
       setSkills([]);
       setRotateWeeks(DEFAULT_ROTATE_WEEKS);
     }
-    const eq = cfg?.equipment ?? { place: 'gym' as Place, items: [...GYM_ITEMS] };
-    setEquipment(eq);
-    setEditGym(eq.place === 'gym' && (eq.items.length !== GYM_ITEMS.length || !GYM_ITEMS.every(i => eq.items.includes(i))));
+    // A new split starts with nothing ticked. Splits saved before the equipment questions meant a
+    // full gym, so changing one starts from everything ticked.
+    setEquipment(cfg ? cfg.equipment ?? { place: 'gym', items: [...GYM_ALL] } : { place: 'gym', items: [] });
     setStrength(cfg?.strength ?? strengthDefaults(lvl));
     setStrengthSet(!!cfg?.strength);
+    setBodyweight(knownBodyweight(cfg));
   }, [visible]);
 
   const owned = useMemo(() => ownedItems(equipment), [equipment]);
@@ -155,15 +187,22 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
   );
   const flow: StepKey[] = nextBlock
     ? ['strength', 'plan']
-    : ['level', 'minutes', 'days', 'rest', 'place', 'strength', ...(skillOpts.length ? ['skills' as const] : []), 'plan'];
+    : [
+      'level', 'minutes', 'days', 'rest', 'place',
+      ...(equipment.place !== 'bodyweight' ? ['equipment' as const] : []),
+      'strength',
+      ...(skillOpts.length ? ['skills' as const] : []),
+      'plan',
+    ];
   const last = flow.length - 1;
   const key = flow[Math.min(step, last)];
 
   const needRest = 7 - days;
   const restOk = restDays.length === needRest;
+  const bodyweightKg = parseBodyweight(bodyweight);
   const plan = useMemo(
-    () => generateSplit({ level, minutes, daysPerWeek: days, restDays, equipment, strength, skills, block }),
-    [level, minutes, days, restDays, equipment, strength, skills, block]
+    () => generateSplit({ level, minutes, daysPerWeek: days, restDays, equipment, strength, skills, block, bodyweightKg }),
+    [level, minutes, days, restDays, equipment, strength, skills, block, bodyweightKg]
   );
   useEffect(() => setSwaps({}), [plan]);
 
@@ -183,14 +222,11 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
 
   // ── Equipment answers ──
   const has = (id: EquipmentId) => equipment.items.includes(id);
-  const choosePlace = (p: Place) => {
-    setEditGym(false);
-    setEquipment(e => {
-      if (e.place === p) return e;
-      if (p === 'gym') return { place: 'gym', items: [...GYM_ITEMS] };
-      return { place: p, items: [] };
-    });
-  };
+  // Nothing is assumed: a gym or home user ticks what they have on the next step
+  const choosePlace = (p: Place) =>
+    setEquipment(e => (e.place === p ? e : { place: p, items: [] }));
+  const selectAllGym = () => setEquipment(e => ({ ...e, items: [...GYM_ALL] }));
+  const clearItems = () => setEquipment(e => ({ ...e, items: [] }));
   const setItem = (id: EquipmentId, on: boolean) =>
     setEquipment(e => ({
       ...e,
@@ -198,12 +234,13 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
     }));
   const toggleItem = (id: EquipmentId) =>
     setEquipment(e => {
+      const home = e.place === 'home';
       if (e.items.includes(id)) {
-        const drop = new Set<EquipmentId>([id, ...(DEPENDENTS[id] ?? [])]);
+        // In a gym, racks, EZ bars and bench types are their own ticks, so only one item goes
+        const drop = new Set<EquipmentId>([id, ...(home ? DEPENDENTS[id] ?? [] : id === 'kettlebell' ? ['kettlebell_pair' as const] : [])]);
         return { ...e, items: e.items.filter(x => !drop.has(x)) };
       }
       // Home weights start from a typical answer; gyms have the full range (so more than one kettlebell)
-      const home = e.place === 'home';
       const added: EquipmentId[] = e.place === 'gym' && id === 'kettlebell' ? [id, 'kettlebell_pair'] : [id];
       return {
         ...e,
@@ -232,6 +269,12 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
   };
 
   const canNext = key !== 'rest' || restOk;
+  const toggleOpenDay = (weekday: number) =>
+    setOpenDays(cur => {
+      const next = new Set(cur);
+      next.has(weekday) ? next.delete(weekday) : next.add(weekday);
+      return next;
+    });
 
   const apply = () => {
     const doApply = () => {
@@ -242,11 +285,13 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
         muscleGroups: day.rest ? 'Rest' : [...new Set(picks.map(e => toPlannerGroup(e.muscle)))].join(','),
         exercises: picks.map(e => ({ name: e.name, muscle: e.muscle })),
       })));
-      const doses: Record<string, string> = {};
-      for (const { day, picks } of finalDays) for (const e of picks) doses[doseKey(day.dayName, e.name)] = `${e.sets} × ${e.reps}`;
+      const targets: Record<string, ExerciseTarget> = {};
+      for (const { day, picks } of finalDays) {
+        for (const e of picks) targets[targetKey(day.dayName, e.name)] = { sets: e.sets, reps: e.reps, load: e.load, kg: e.kg };
+      }
       const cfg: SplitConfig = {
-        level, minutes, daysPerWeek: days, restDays, equipment, strength, skills, block,
-        rotateWeeks, blockStart: todayStr(), name: plan.name, prescription: plan.prescription, doses,
+        level, minutes, daysPerWeek: days, restDays, equipment, strength, skills, block, bodyweightKg,
+        rotateWeeks, blockStart: todayStr(), name: plan.name, prescription: plan.prescription, targets,
       };
       setSetting(SETTING_KEY, JSON.stringify(cfg));
       onApplied();
@@ -357,14 +402,46 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
                     {equipment.place === p.key && <Ionicons name="checkmark-circle" size={20} color={C.accent} />}
                   </Option>
                 ))}
+                {equipment.place === 'bodyweight' && (
+                  <Text style={styles.hint}>{available} exercises need no equipment</Text>
+                )}
+              </>
+            )}
 
+            {key === 'equipment' && (
+              <>
+                <Text style={styles.q}>What equipment do you have?</Text>
+                <Text style={styles.qSub}>
+                  {equipment.place === 'gym'
+                    ? 'Tick everything your gym has. Your plan only uses exercises you can do there.'
+                    : 'Tick what you have at home. Your plan only uses exercises you can do with it.'}
+                </Text>
+                {equipment.place === 'gym' && (
+                  <View style={styles.bulkRow}>
+                    <TouchableOpacity onPress={selectAllGym} hitSlop={HIT} style={styles.bulkBtn}>
+                      <Ionicons name="checkmark-done-outline" size={14} color={C.accent} />
+                      <Text style={styles.linkTxt}>Select all</Text>
+                    </TouchableOpacity>
+                    {equipment.items.length > 0 && (
+                      <TouchableOpacity onPress={clearItems} hitSlop={HIT} style={styles.bulkBtn}>
+                        <Ionicons name="close-circle-outline" size={14} color={C.muted} />
+                        <Text style={[styles.linkTxt, { color: C.muted }]}>Clear</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+                {(equipment.place === 'gym' ? GYM_GROUPS : HOME_GROUPS).map((g, gi) => (
+                  <View key={g.title} style={styles.group}>
+                    <Text style={styles.groupTitle}>{g.title}</Text>
+                    <View style={styles.chips}>
+                      {g.items.map(id => chip(id, EQUIPMENT_LABEL[id], has(id), () => toggleItem(id)))}
+                    </View>
+                    {/* Home weights: how heavy, and what goes with them */}
+                    {gi === 0 && followUps.length > 0 && <View style={styles.followBox}>{followUps}</View>}
+                  </View>
+                ))}
                 {equipment.place === 'home' && (
                   <>
-                    <Text style={styles.label}>What do you have?</Text>
-                    <View style={styles.chips}>
-                      {HOME_ITEMS.map(id => chip(id, EQUIPMENT_LABEL[id], has(id), () => toggleItem(id)))}
-                    </View>
-                    {followUps.length > 0 && <View style={styles.followBox}>{followUps}</View>}
                     <TouchableOpacity onPress={() => setShowMore(m => !m)} style={styles.moreBtn} hitSlop={HIT}>
                       <Text style={styles.moreTxt}>{showMore ? 'Fewer options' : 'More equipment'}</Text>
                       <Ionicons name={showMore ? 'chevron-up' : 'chevron-down'} size={14} color={C.accent} />
@@ -376,23 +453,11 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
                     )}
                   </>
                 )}
-
-                {equipment.place === 'gym' && (editGym ? (
-                  <>
-                    <Text style={styles.label}>What does your gym have?</Text>
-                    <View style={styles.chips}>
-                      {GYM_CHECKLIST.map(id => chip(id, EQUIPMENT_LABEL[id], has(id), () => toggleItem(id)))}
-                    </View>
-                  </>
-                ) : (
-                  <TouchableOpacity onPress={() => setEditGym(true)} hitSlop={HIT}>
-                    <Text style={styles.hint}>
-                      Full gym assumed · <Text style={{ color: C.accent }}>Missing something? Edit</Text>
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-
-                <Text style={styles.hint}>{available} exercises fit your equipment</Text>
+                <Text style={[styles.hint, !equipment.items.length && { color: C.orange }]}>
+                  {equipment.items.length
+                    ? `${available} exercises fit your equipment`
+                    : 'Nothing ticked yet — your plan will be bodyweight only'}
+                </Text>
               </>
             )}
 
@@ -408,6 +473,26 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
                   {choiceRow('Push-ups in a row', PUSH_OPTIONS, strength.push, v => setStrengthKey('push', v))}
                   {hasBar && choiceRow('Pull-ups in a row', PULL_OPTIONS, strength.pull, v => setStrengthKey('pull', v))}
                   {choiceRow('Bodyweight squats in a row', SQUAT_OPTIONS, strength.squat, v => setStrengthKey('squat', v))}
+                  <View>
+                    <Text style={styles.rowLbl}>Your bodyweight</Text>
+                    <View style={styles.bwRow}>
+                      <TextInput
+                        style={styles.bwInput}
+                        value={bodyweight}
+                        onChangeText={setBodyweight}
+                        keyboardType="decimal-pad"
+                        placeholder={String(DEFAULT_BODYWEIGHT_KG)}
+                        placeholderTextColor={C.muted}
+                        maxLength={5}
+                      />
+                      <Text style={styles.bwUnit}>kg</Text>
+                    </View>
+                    <Text style={styles.bwHint}>
+                      {bodyweightKg
+                        ? 'Used to suggest your starting weights.'
+                        : `Used to suggest your starting weights. Leave it empty and we'll assume ${DEFAULT_BODYWEIGHT_KG} kg.`}
+                    </Text>
+                  </View>
                 </View>
               </>
             )}
@@ -463,7 +548,19 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
             {key === 'rest' && (
               <>
                 <Text style={styles.q}>Which are your rest days?</Text>
-                <Text style={styles.qSub}>Pick {needRest} {needRest === 1 ? 'day' : 'days'} off.</Text>
+                <Text style={styles.qSub}>
+                  Pick {needRest} {needRest === 1 ? 'day' : 'days'} off. Tap a day to switch it between training and rest.
+                </Text>
+                <View style={styles.legend}>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: C.accent }]} />
+                    <Text style={styles.legendTxt}>Blue = training day</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: C.border }]} />
+                    <Text style={styles.legendTxt}>Grey = rest day</Text>
+                  </View>
+                </View>
                 <View style={styles.week}>
                   {WEEK_ORDER.map(d => {
                     const rest = restDays.includes(d);
@@ -472,13 +569,16 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
                         <View style={[styles.weekDay, rest ? { backgroundColor: C.border } : { backgroundColor: C.accent }]}>
                           <Text style={[styles.weekLetter, { color: rest ? C.muted : '#fff' }]}>{LETTERS[d]}</Text>
                         </View>
+                        <Ionicons name={rest ? 'moon-outline' : 'barbell-outline'} size={14} color={rest ? C.muted : C.accent} />
                         <Text style={[styles.weekLbl, { color: rest ? C.muted : C.accent }]}>{rest ? 'Rest' : 'Train'}</Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
                 <Text style={[styles.hint, !restOk && { color: C.orange }]}>
-                  {restOk ? 'Looks good' : `${restDays.length} of ${needRest} rest days selected`}
+                  {restOk
+                    ? `Looks good: ${days} training days, ${needRest} rest ${needRest === 1 ? 'day' : 'days'}`
+                    : `${restDays.length} of ${needRest} rest days selected`}
                 </Text>
               </>
             )}
@@ -488,9 +588,42 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
                 <Text style={styles.kicker}>{nextBlock ? `Your split · block ${block + 1}` : 'Your split'}</Text>
                 <Text style={styles.planName}>{plan.name}</Text>
                 <Text style={styles.qSub}>{plan.summary} Picked from {plan.available} exercises that fit your equipment.</Text>
+
+                {/* The week at a glance; tapping a training day opens it below */}
+                <View style={styles.strip}>
+                  <View style={styles.week}>
+                    {plan.days.map(d => (
+                      <TouchableOpacity key={d.weekday} disabled={d.rest} onPress={() => setOpenDays(s => new Set(s).add(d.weekday))}
+                        activeOpacity={0.8} style={styles.weekCol}>
+                        <View style={[styles.miniDay, d.rest ? { backgroundColor: C.border } : { backgroundColor: C.accent, borderColor: C.accent }]}>
+                          <Text style={[styles.miniLetter, { color: d.rest ? C.muted : '#fff' }]}>{LETTERS[d.weekday]}</Text>
+                        </View>
+                        <Ionicons name={d.rest ? 'moon-outline' : 'barbell-outline'} size={12} color={d.rest ? C.muted : C.accent} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={[styles.legend, { marginTop: 10, marginBottom: 0 }]}>
+                    <View style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: C.accent }]} />
+                      <Text style={styles.legendTxt}>Training</Text>
+                    </View>
+                    <View style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: C.border }]} />
+                      <Text style={styles.legendTxt}>Rest</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.rx}>
+                  <Ionicons name="repeat-outline" size={16} color={C.accent} />
+                  <Text style={styles.rxTxt}>{plan.prescription}</Text>
+                </View>
                 <View style={styles.rx}>
                   <Ionicons name="barbell-outline" size={16} color={C.accent} />
-                  <Text style={styles.rxTxt}>{plan.prescription}</Text>
+                  <Text style={styles.rxTxt}>
+                    Starting weights are a first guess from your strength check and bodyweight. Barbell weights
+                    include the 20 kg bar. If the top of the rep range feels easy, add weight next session.
+                  </Text>
                 </View>
                 {plan.laterSkills.length > 0 && (
                   <View style={styles.note}>
@@ -520,42 +653,83 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
                     </Text>
                   </View>
                 )}
-                <View style={{ marginBottom: 8 }}>
-                  {choiceRow('New exercises every', ROTATE_OPTIONS.map(w => `${w} weeks`), ROTATE_OPTIONS.indexOf(rotateWeeks),
-                    i => setRotateWeeks(ROTATE_OPTIONS[i]))}
+                <View style={{ marginTop: 4, marginBottom: 18 }}>
+                  {choiceRow('New exercises every', ROTATE_OPTIONS.map(w => `${w} week${w === 1 ? '' : 's'}`),
+                    ROTATE_OPTIONS.indexOf(rotateWeeks), i => setRotateWeeks(ROTATE_OPTIONS[i]))}
                 </View>
+
+                <Text style={styles.groupTitle}>Your week · tap a day to see its exercises</Text>
                 {plan.days.map(d => {
-                  const open = openDay === d.weekday;
+                  if (d.rest) {
+                    return (
+                      <View key={d.weekday} style={[styles.dayCard, styles.restCard]}>
+                        <View style={[styles.dayBadge, { backgroundColor: C.border }]}>
+                          <Text style={[styles.dayBadgeTxt, { color: C.muted }]}>{DAY_NAMES[d.weekday].slice(0, 3)}</Text>
+                        </View>
+                        <Text style={[styles.dayTitle, { color: C.muted, flex: 1 }]}>Rest day</Text>
+                        <Ionicons name="moon-outline" size={16} color={C.muted} />
+                      </View>
+                    );
+                  }
+                  const open = openDays.has(d.weekday);
+                  const picks = d.exercises.map((_, i) => shown(d, i));
+                  const muscles = [...new Set(picks.map(e => e.muscle))];
                   return (
-                    <View key={d.weekday} style={[styles.dayRow, d.rest && { opacity: 0.55 }]}>
-                      <TouchableOpacity disabled={d.rest} onPress={() => setOpenDay(open ? null : d.weekday)}
-                        activeOpacity={0.75} style={styles.dayHead}>
-                        <Text style={styles.dayName}>{DAY_NAMES[d.weekday].slice(0, 3)}</Text>
-                        <Text style={styles.dayTitle}>{d.title}</Text>
-                        {!d.rest && <Text style={styles.dayCount}>{d.exercises.length} ex</Text>}
-                        {!d.rest && <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={C.muted} />}
+                    <View key={d.weekday} style={[styles.dayCard, open && { borderColor: C.accent + '66' }]}>
+                      <TouchableOpacity onPress={() => toggleOpenDay(d.weekday)} activeOpacity={0.75} style={styles.dayHead}>
+                        <View style={[styles.dayBadge, { backgroundColor: C.accent + '1A' }]}>
+                          <Text style={[styles.dayBadgeTxt, { color: C.accent }]}>{DAY_NAMES[d.weekday].slice(0, 3)}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.dayTitle}>{d.title}</Text>
+                          <Text style={styles.daySub} numberOfLines={1}>
+                            {picks.length} exercises · {muscles.slice(0, 3).join(', ')}{muscles.length > 3 ? ` +${muscles.length - 3}` : ''}
+                          </Text>
+                        </View>
+                        <View style={styles.chevron}>
+                          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={C.accent} />
+                        </View>
                       </TouchableOpacity>
-                      {open && d.exercises.map((ex, i) => {
-                        const e = shown(d, i);
-                        const color = C.mg[e.muscle] ?? C.accent;
-                        return (
-                          <View key={`${d.weekday}:${i}`} style={styles.exRow}>
-                            <View style={[styles.exDot, { backgroundColor: color }]} />
-                            <Text style={styles.exName} numberOfLines={1}>{e.name}</Text>
-                            <Text style={styles.exDose}>{e.sets} × {e.reps}</Text>
-                            {ex.alternatives.length > 0 && (
-                              <TouchableOpacity onPress={() => swap(d, i)} hitSlop={HIT} style={styles.swapBtn}>
-                                <Ionicons name="swap-horizontal" size={16} color={C.accent} />
-                              </TouchableOpacity>
-                            )}
-                            <ExerciseGuideButton name={e.name} color={color} />
-                          </View>
-                        );
-                      })}
+                      {open && (
+                        <View style={styles.exList}>
+                          {picks.map((e, i) => {
+                            const color = C.mg[e.muscle] ?? C.accent;
+                            return (
+                              <View key={`${d.weekday}:${i}`} style={[styles.exRow, i > 0 && styles.exRowDivider]}>
+                                <View style={[styles.exIndex, { backgroundColor: color + '22' }]}>
+                                  <Text style={[styles.exIndexTxt, { color }]}>{i + 1}</Text>
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={styles.exName} numberOfLines={2}>{e.name}</Text>
+                                  <View style={styles.tags}>
+                                    <View style={styles.tag}>
+                                      <Ionicons name="repeat-outline" size={11} color={C.textSub} />
+                                      <Text style={styles.tagTxt}>{e.sets} × {e.reps}</Text>
+                                    </View>
+                                    <View style={[styles.tag, { backgroundColor: C.accent + '14', borderColor: C.accent + '40' }]}>
+                                      <Ionicons name={e.kg !== undefined ? 'barbell-outline' : 'body-outline'} size={11} color={C.accent} />
+                                      <Text style={[styles.tagTxt, { color: C.accent }]}>{e.load}</Text>
+                                    </View>
+                                  </View>
+                                </View>
+                                {d.exercises[i].alternatives.length > 0 && (
+                                  <TouchableOpacity onPress={() => swap(d, i)} hitSlop={HIT} style={styles.swapBtn}>
+                                    <Ionicons name="swap-horizontal" size={16} color={C.accent} />
+                                  </TouchableOpacity>
+                                )}
+                                <ExerciseGuideButton name={e.name} color={color} />
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
                     </View>
                   );
                 })}
-                <Text style={styles.hint}>Open a day to see its exercises · the swap icon picks another that fits</Text>
+                <Text style={styles.hint}>
+                  <Ionicons name="swap-horizontal" size={12} color={C.muted} /> swaps an exercise for another that fits ·
+                  <Ionicons name="play" size={11} color={C.muted} /> shows how to do it
+                </Text>
               </>
             )}
           </ScrollView>
@@ -701,7 +875,6 @@ function makeStyles(C: any) {
     optIcon:   { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     optTitle:  { fontSize: 15, fontWeight: '800', color: C.text },
     optSub:    { fontSize: 12, color: C.muted, fontWeight: '600', marginTop: 2 },
-    label:     { fontSize: 14, fontWeight: '800', color: C.text, marginTop: 8, marginBottom: 10 },
     chips:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     chip:      { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.bg },
     chipOn:    { borderColor: C.accent, backgroundColor: C.accent + '14' },
@@ -731,15 +904,40 @@ function makeStyles(C: any) {
     planName:  { fontSize: 26, fontWeight: '800', color: C.accent, marginTop: 2 },
     rx:        { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.bg, borderRadius: 12, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: C.border },
     rxTxt:     { flex: 1, fontSize: 12, fontWeight: '700', color: C.textSub },
-    dayRow:    { borderBottomWidth: 1, borderBottomColor: C.border },
-    dayHead:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
-    dayName:   { width: 44, fontSize: 13, fontWeight: '800', color: C.muted },
-    dayTitle:  { flex: 1, fontSize: 15, fontWeight: '800', color: C.text },
-    dayCount:  { fontSize: 12, fontWeight: '700', color: C.muted, marginRight: 8 },
-    exRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingLeft: 44 },
-    exDot:     { width: 6, height: 6, borderRadius: 3, marginRight: 8 },
-    exName:    { flex: 1, fontSize: 13, fontWeight: '600', color: C.textSub },
-    exDose:    { fontSize: 12, fontWeight: '800', color: C.text },
+    // Equipment step
+    bulkRow:   { flexDirection: 'row', gap: 18, marginBottom: 4 },
+    bulkBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    group:     { marginTop: 14 },
+    groupTitle:{ fontSize: 12, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
+    // Strength step
+    bwRow:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    bwInput:   { width: 96, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.card, color: C.text, fontSize: 15, fontWeight: '800' },
+    bwUnit:    { fontSize: 13, fontWeight: '800', color: C.muted },
+    bwHint:    { fontSize: 11, fontWeight: '600', color: C.muted, marginTop: 6 },
+    // Rest days and the plan's week strip
+    legend:    { flexDirection: 'row', justifyContent: 'center', gap: 18, marginBottom: 14 },
+    legendItem:{ flexDirection: 'row', alignItems: 'center', gap: 6 },
+    legendDot: { width: 12, height: 12, borderRadius: 6 },
+    legendTxt: { fontSize: 12, fontWeight: '700', color: C.textSub },
+    strip:     { backgroundColor: C.bg, borderRadius: 16, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: C.border },
+    // Plan days
+    dayCard:   { backgroundColor: C.bg, borderRadius: 16, borderWidth: 1, borderColor: C.border, marginBottom: 8, overflow: 'hidden' },
+    restCard:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 8, opacity: 0.7 },
+    dayHead:   { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
+    dayBadge:  { width: 44, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    dayBadgeTxt: { fontSize: 12, fontWeight: '800' },
+    dayTitle:  { fontSize: 15, fontWeight: '800', color: C.text },
+    daySub:    { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 2 },
+    chevron:   { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accent + '14' },
+    exList:    { borderTopWidth: 1, borderTopColor: C.border, paddingHorizontal: 12 },
+    exRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+    exRowDivider: { borderTopWidth: 1, borderTopColor: C.border + '99' },
+    exIndex:   { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    exIndexTxt:{ fontSize: 11, fontWeight: '800' },
+    exName:    { fontSize: 14, fontWeight: '700', color: C.text },
+    tags:      { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 5 },
+    tag:       { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.card },
+    tagTxt:    { fontSize: 11, fontWeight: '800', color: C.textSub },
     footer:    { flexDirection: 'row', gap: 10, marginTop: 16 },
     backBtn:   { paddingHorizontal: 20, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: C.border },
     backTxt:   { fontSize: 15, fontWeight: '700', color: C.muted },

@@ -36,18 +36,30 @@ export const HOME_ITEMS: EquipmentId[] = [
 ];
 /** Shown behind "More equipment". */
 export const MORE_ITEMS: EquipmentId[] = ['cable', 'smith', 'machines'];
-/** What a commercial gym is assumed to have. */
+/** What a commercial gym is assumed to have when a saved split has no equipment answers. */
 export const GYM_ITEMS: EquipmentId[] = [
   'dumbbells', 'barbell', 'rack', 'ez_bar', 'bench', 'adj_bench', 'kettlebell', 'kettlebell_pair',
   'cable', 'smith', 'machines', 'pullup_bar', 'dip_bars', 'bands', 'box', 'med_ball',
   'stability_ball', 'ab_wheel', 'jump_rope', 'foam_roller', 'cardio',
 ];
 
-/** Checklist when a gym user edits what their gym has. */
-export const GYM_CHECKLIST: EquipmentId[] = [
-  'dumbbells', 'barbell', 'rack', 'ez_bar', 'bench', 'adj_bench', 'kettlebell', 'cable', 'smith',
-  'machines', 'pullup_bar', 'dip_bars', 'bands', 'rings', 'box', 'med_ball', 'stability_ball', 'ab_wheel',
+export interface EquipmentGroup { title: string; items: EquipmentId[] }
+
+/** The equipment checklist, in groups. Gyms tick what they have; nothing is assumed. */
+export const GYM_GROUPS: EquipmentGroup[] = [
+  { title: 'Free weights', items: ['dumbbells', 'barbell', 'rack', 'ez_bar', 'kettlebell', 'bench', 'adj_bench'] },
+  { title: 'Machines', items: ['cable', 'smith', 'machines'] },
+  { title: 'Bars & stations', items: ['pullup_bar', 'dip_bars', 'rings'] },
+  { title: 'Accessories', items: ['bands', 'box', 'med_ball', 'stability_ball', 'ab_wheel'] },
 ];
+/** At home, racks, EZ bars and bench types are follow-up questions; machines sit behind "More equipment". */
+export const HOME_GROUPS: EquipmentGroup[] = [
+  { title: 'Weights', items: ['dumbbells', 'barbell', 'kettlebell', 'bench'] },
+  { title: 'Bars & stations', items: ['pullup_bar', 'dip_bars', 'rings'] },
+  { title: 'Accessories', items: ['bands', 'box', 'med_ball', 'stability_ball', 'ab_wheel', 'jump_rope', 'foam_roller'] },
+];
+/** "Select all" for a gym: the whole checklist, plus a range of kettlebells and cardio machines. */
+export const GYM_ALL: EquipmentId[] = [...GYM_GROUPS.flatMap(g => g.items), 'kettlebell_pair', 'cardio'];
 
 // Follow-up chips (kg). The last option means "or more".
 export const DUMBBELL_KG = [5, 10, 20, 30];

@@ -40,7 +40,7 @@ import { Card, Btn, MuscleTag, SectionHeader, EmptyState } from '../components/u
 import BodyAnatomy from '../components/BodyAnatomy';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 import { findExercise } from '../constants/exerciseCatalog';
-import { SplitWizard, SplitCard, getSplitConfig, doseFor } from '../components/SplitWizard';
+import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText } from '../components/SplitWizard';
 import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -520,8 +520,12 @@ function ExerciseLogCard({
   const { C } = useTheme();
   const styles = makeStyles(C);
   const { showAlert } = useCustomAlert();
+  // What the split builder set for this exercise today: shown as a target, and the
+  // starting weight becomes the weight box's hint
+  const [target] = useState(() => targetFor(getSplitConfig(), ex.day_of_week, ex.exercise_name));
   const [sets, setSets] = useState('1');
-  const [reps, setReps] = useState('8');
+  // Start the reps at the bottom of the target range ('8–12' → 8); timed holds keep the default
+  const [reps, setReps] = useState(() => target?.reps.match(/^(\d+)(?:–\d+)?$/)?.[1] ?? '8');
   const [weight, setWeight] = useState('');
 
   const [setsModal, setSetsModal] = useState(false);
@@ -556,6 +560,18 @@ function ExerciseLogCard({
           <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} variant="pill" />
         </View>
 
+        {target && (
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14, paddingHorizontal: 10, paddingVertical: 8,
+            borderRadius: 10, backgroundColor: C.accent + '14', borderWidth: 1, borderColor: C.accent + '40',
+          }}>
+            <Ionicons name="flag-outline" size={14} color={C.accent} />
+            <Text style={{ flex: 1, fontSize: 13, fontWeight: '700', color: C.text }}>
+              Target <Text style={{ color: C.accent, fontWeight: '800' }}>{targetText(target)}</Text>
+            </Text>
+          </View>
+        )}
+
         {loggedSets.length > 0 && (
           <View style={{ marginBottom: 16 }}>
             {loggedSets.map((s, i) => (
@@ -585,7 +601,7 @@ function ExerciseLogCard({
               keyboardType="decimal-pad"
               value={weight}
               onChangeText={setWeight}
-              placeholder="60"
+              placeholder={target?.kg !== undefined ? String(target.kg) : '60'}
               placeholderTextColor={C.muted}
             />
           </View>
@@ -1374,13 +1390,15 @@ function PlannerTab({
                   <View key={mg}>
                     <Text style={[styles.plannedMuscleHeader, { color: C.mg[mg] || C.accent }]}>{mg}</Text>
                     {exList.map(ex => {
-                      // Sets × reps the split builder picked for this exercise on this day
-                      const dose = doseFor(splitConfig, day, ex.exercise_name);
+                      // Sets × reps and starting weight the split builder picked for this exercise on this day
+                      const target = targetFor(splitConfig, day, ex.exercise_name);
                       return (
                         <View key={ex.id} style={styles.plannedExerciseRow}>
                           <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
-                          <Text style={[styles.exName, { flex: 1 }]}>{ex.exercise_name}</Text>
-                          {dose ? <Text style={ps.dose}>{dose}</Text> : null}
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.exName, { flex: 0 }]}>{ex.exercise_name}</Text>
+                            {target ? <Text style={ps.dose}>{targetText(target)}</Text> : null}
+                          </View>
                           <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} />
                           <TouchableOpacity onPress={() => onDeleteExercise(ex.id)} style={[styles.deletePlanExBtn, { marginLeft: 10 }]}>
                             <Text style={styles.deletePlanExText}>×</Text>
@@ -1465,7 +1483,7 @@ function makePlannerStyles(C: any) {
     dots:      { flexDirection: 'row', gap: 4 },
     dot:       { width: 8, height: 8, borderRadius: 4 },
     body:      { paddingHorizontal: 16, paddingBottom: 16, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
-    dose:      { fontSize: 12, fontWeight: '800', color: C.textSub, marginLeft: 8 },
+    dose:      { fontSize: 12, fontWeight: '700', color: C.accent, marginTop: 2 },
   });
 }
 
