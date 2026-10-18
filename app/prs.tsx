@@ -17,7 +17,8 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { EXERCISE_LIBRARY, BODYWEIGHT_EXERCISES } from '../constants/theme';
-import { isBodyweightExercise } from '../constants/equipment';
+import { isBodyweightExercise, loadTypeOf } from '../constants/equipment';
+import { findExercise, MUSCLE_GROUP_ORDER } from '../constants/exerciseCatalog';
 import { WheelPicker } from '../components/WheelPicker';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 
@@ -30,6 +31,30 @@ const LIB_MUSCLE: Record<string, string> = {};
 Object.entries(EXERCISE_LIBRARY).forEach(([muscle, list]) =>
   list.forEach(ex => { if (!LIB_MUSCLE[ex]) LIB_MUSCLE[ex] = muscle; })
 );
+
+// Equipment sections inside each body part, in this order
+type Equip = 'Barbell' | 'Dumbbells' | 'Machines & cables' | 'Kettlebells' | 'Bodyweight' | 'Bands' | 'Other';
+const EQUIP_ORDER: Equip[] = ['Barbell', 'Dumbbells', 'Machines & cables', 'Kettlebells', 'Bodyweight', 'Bands', 'Other'];
+const EQUIP_ICON: Record<Equip, keyof typeof Ionicons.glyphMap> = {
+  Barbell: 'barbell-outline', Dumbbells: 'barbell', 'Machines & cables': 'cog-outline', Kettlebells: 'fitness-outline',
+  Bodyweight: 'body-outline', Bands: 'pulse-outline', Other: 'ellipsis-horizontal-circle-outline',
+};
+const CATALOG_EQUIP: Record<string, Equip> = {
+  Barbell: 'Barbell', 'E-z curl bar': 'Barbell', Dumbbell: 'Dumbbells', Machine: 'Machines & cables',
+  Cable: 'Machines & cables', Kettlebells: 'Kettlebells', 'Body only': 'Bodyweight', Bands: 'Bands',
+};
+/** What a lift is done with: the catalog's equipment, else the weight table / name. */
+function equipmentOf(name: string, repsOnly: boolean): Equip {
+  const fromCatalog = CATALOG_EQUIP[findExercise(name)?.equipment ?? ''];
+  if (fromCatalog) return fromCatalog;
+  switch (loadTypeOf(name)) {
+    case 'barbell': case 'ez': case 'smith': return 'Barbell';
+    case 'db': case 'db1': return 'Dumbbells';
+    case 'stack': case 'sled': return 'Machines & cables';
+    case 'kb': case 'kb2': return 'Kettlebells';
+  }
+  return repsOnly ? 'Bodyweight' : 'Other';
+}
 
 function calc1RM(weight: number, reps: number): number {
   return reps <= 1 ? weight : weight * (1 + reps / 30);
@@ -195,6 +220,8 @@ export default function PRScreen() {
   const [detailEx, setDetailEx]   = useState<string | null>(null);
   const [selIdx, setSelIdx]       = useState(0);
   const [celebrate, setCelebrate] = useState<string | null>(null);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());  // expanded body parts
+  const [viewAll, setViewAll]       = useState(false);
 
   // Log / edit sheet
   const [logOpen, setLogOpen]       = useState(false);
@@ -302,6 +329,55 @@ export default function PRScreen() {
     return { now, prev };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entriesByEx, customMap]);
+
+  // How many times each lift's best was beaten (the first entry sets it, it doesn't break it)
+  const brokenByEx = useMemo(() => {
+    const m: Record<string, number> = {};
+    Object.entries(entriesByEx).forEach(([name, list]) => {
+      let best = -Infinity, n = 0;
+      list.forEach(e => {
+        const s = score(name, e.weight, e.reps);
+        if (best > -Infinity && s > best) n++;
+        best = Math.max(best, s);
+      });
+      m[name] = n;
+    });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entriesByEx, customMap]);
+
+  // All records: body part → equipment → lifts (most recent first, as sortedPRs)
+  const grouped = useMemo(() => {
+    const byMuscle: Record<string, Partial<Record<Equip, PR[]>>> = {};
+    sortedPRs.forEach(pr => {
+      const name = pr.exercise_name;
+      const eq = equipmentOf(name, repsOnly(name));
+      ((byMuscle[muscleOf(name)] ??= {})[eq] ??= []).push(pr);
+    });
+    const order = [...MUSCLE_GROUP_ORDER, ...MUSCLES.filter(m => !MUSCLE_GROUP_ORDER.includes(m))];
+    return Object.entries(byMuscle)
+      .sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99) || a.localeCompare(b))
+      .map(([muscle, byEq]) => ({
+        muscle,
+        count: Object.values(byEq).reduce((n, l) => n + (l?.length ?? 0), 0),
+        broken: Object.values(byEq).flat().reduce((n, p) => n + (brokenByEx[p!.exercise_name] ?? 0), 0),
+        sections: EQUIP_ORDER.filter(e => byEq[e]?.length).map(e => ({ equip: e, prs: byEq[e]! })),
+      }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedPRs, customMap, brokenByEx]);
+  const toggleGroup = (m: string) => setOpenGroups(prev => {
+    const next = new Set(prev);
+    if (next.has(m)) next.delete(m); else next.add(m);
+    return next;
+  });
+
+  // View all: every exercise ever logged, with its best and how many PRs it has broken
+  const everyLift = useMemo(() => {
+    const names = [...new Set([...prs.map(p => p.exercise_name), ...logged])];
+    return names
+      .map(name => ({ name, pr: prMap[name] as PR | undefined, broken: brokenByEx[name] ?? 0 }))
+      .sort((a, b) => b.broken - a.broken || (a.pr ? 0 : 1) - (b.pr ? 0 : 1) || a.name.localeCompare(b.name));
+  }, [prs, logged, prMap, brokenByEx]);
 
   // Donut: lifts per muscle group (top 4 + More)
   const muscleSegments = useMemo(() => {
@@ -592,12 +668,101 @@ export default function PRScreen() {
               </View>
             )}
 
-            {/* All */}
-            <Text style={styles.section}>All records</Text>
-            <View style={{ gap: 8 }}>{sortedPRs.map(pr => <RecordRow key={pr.exercise_name} pr={pr} />)}</View>
+            {/* All, by body part then equipment */}
+            <View style={styles.sectionRow}>
+              <Text style={[styles.section, { flex: 1, marginTop: 0, marginBottom: 0 }]}>All records</Text>
+              <TouchableOpacity style={styles.modePill} onPress={() => setViewAll(true)} hitSlop={HIT} activeOpacity={0.8}>
+                <Ionicons name="list" size={14} color={C.accent} />
+                <Text style={styles.modePillTxt}>View all</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ gap: 10 }}>
+              {grouped.map(g => {
+                const open = openGroups.has(g.muscle);
+                const color = C.mg[g.muscle] ?? C.muted;
+                return (
+                  <View key={g.muscle} style={styles.groupCard}>
+                    <TouchableOpacity style={styles.groupHead} onPress={() => toggleGroup(g.muscle)} activeOpacity={0.8}>
+                      <View style={[styles.groupIcon, { backgroundColor: color + '22' }]}>
+                        <View style={[styles.groupDot, { backgroundColor: color }]} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.groupName}>{g.muscle}</Text>
+                        <Text style={styles.rowMeta}>
+                          {g.count} {g.count === 1 ? 'lift' : 'lifts'} · {g.sections.map(s => s.equip).join(', ')}
+                        </Text>
+                      </View>
+                      {g.broken > 0 && (
+                        <View style={styles.brokenPill}>
+                          <Ionicons name="trophy" size={11} color={C.yellow} />
+                          <Text style={styles.brokenPillTxt}>{g.broken}</Text>
+                        </View>
+                      )}
+                      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={C.muted} />
+                    </TouchableOpacity>
+                    {open && g.sections.map(s => (
+                      <View key={s.equip} style={{ marginTop: 10 }}>
+                        <View style={styles.equipHead}>
+                          <Ionicons name={EQUIP_ICON[s.equip]} size={13} color={C.muted} />
+                          <Text style={styles.equipTxt}>{s.equip}</Text>
+                          <Text style={styles.equipCount}>{s.prs.length}</Text>
+                        </View>
+                        <View style={{ gap: 8 }}>{s.prs.map(pr => <RecordRow key={pr.exercise_name} pr={pr} />)}</View>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })}
+            </View>
           </>
         )}
       </ScrollView>
+
+      {/* ── View all: every logged exercise and the PRs broken in it ── */}
+      <Modal visible={viewAll} transparent animationType="slide" onRequestClose={() => setViewAll(false)}>
+        <View style={styles.overlay}>
+          <View style={[styles.sheet, { height: '90%' }]}>
+            <View style={styles.handle} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sheetTitle}>All exercises</Text>
+                <Text style={styles.rowMeta}>
+                  {everyLift.length} logged · {everyLift.reduce((n, l) => n + l.broken, 0)} PRs broken
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setViewAll(false)} hitSlop={HIT}>
+                <Ionicons name="close-circle" size={26} color={C.muted} />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={everyLift}
+              keyExtractor={l => l.name}
+              style={{ marginTop: 10 }}
+              contentContainerStyle={{ gap: 8, paddingBottom: 24 }}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item: l }) => (
+                <TouchableOpacity style={styles.row} activeOpacity={0.75} disabled={!l.pr}
+                  onPress={() => { setViewAll(false); setTimeout(() => openDetail(l.name), 250); }}>
+                  <View style={[styles.rowBar, { backgroundColor: colorOf(l.name) }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowName} numberOfLines={1}>{l.name}</Text>
+                    <Text style={styles.rowMeta} numberOfLines={1}>
+                      {muscleOf(l.name)} · {equipmentOf(l.name, repsOnly(l.name))}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    {l.pr ? <BigLift name={l.name} w={l.pr.weight} r={l.pr.reps} size={15} />
+                      : <Text style={styles.rowMeta}>No PR yet</Text>}
+                    <Text style={[styles.rowMeta, l.broken > 0 && { color: C.green, fontWeight: '800' }]}>
+                      {l.broken > 0 ? `${l.broken} ${l.broken === 1 ? 'PR' : 'PRs'} broken` : 'No PRs broken'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
 
       {/* ── Detail sheet ── */}
       <Modal visible={!!detailEx} transparent animationType="slide" onRequestClose={() => setDetailEx(null)}>
@@ -935,6 +1100,17 @@ function makeStyles(C: any) {
 
     row:         { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, paddingVertical: 12, paddingRight: 12, paddingLeft: 14, borderWidth: 1, borderColor: C.border },
     rowBar:      { width: 4, height: 30, borderRadius: 2, marginRight: 12 },
+    sectionRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 22, marginBottom: 10 },
+    groupCard:   { backgroundColor: C.card, borderRadius: 18, padding: 12, borderWidth: 1, borderColor: C.border },
+    groupHead:   { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    groupIcon:   { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+    groupDot:    { width: 12, height: 12, borderRadius: 6 },
+    groupName:   { fontSize: 15, fontWeight: '800', color: C.text },
+    brokenPill:  { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10, backgroundColor: C.yellow + '1F' },
+    brokenPillTxt: { fontSize: 11, fontWeight: '800', color: C.yellow },
+    equipHead:   { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, paddingHorizontal: 2 },
+    equipTxt:    { fontSize: 11, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
+    equipCount:  { fontSize: 11, fontWeight: '700', color: C.muted },
     rowName:     { fontSize: 14, fontWeight: '700', color: C.text },
     rowMeta:     { fontSize: 11, color: C.muted, fontWeight: '600', marginTop: 2 },
 

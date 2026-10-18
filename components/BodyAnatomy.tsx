@@ -1,9 +1,10 @@
 // components/BodyAnatomy.tsx
-// Dots placed directly ON TOP of each muscle â€” Upper Back & Lower Back split.
+// Front / back body picture with each trained muscle shaded red: the more sets, the deeper the red.
+// Each muscle group has a mask traced from the picture's own outlines (assets/muscles), so the
+// colour fills exactly that muscle and nothing around it.
 
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import Svg, { Circle, G } from 'react-native-svg';
+import { View, Text, TouchableOpacity, StyleSheet, Image, ImageSourcePropType } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 
 export type BodyView = 'front' | 'back';
@@ -18,56 +19,36 @@ interface Props {
 const W = 260;
 const H = 390;
 
-const FRONT_DOTS = [
-  { id: 'fs-l',  muscle: 'Shoulders',  cx: 80,  cy: 106 },
-  { id: 'fs-r',  muscle: 'Shoulders',  cx: 180, cy: 106 },
-  { id: 'fc-l',  muscle: 'Chest',      cx: 110, cy: 118 },
-  { id: 'fc-r',  muscle: 'Chest',      cx: 150, cy: 118 },
-  { id: 'fb-l',  muscle: 'Biceps',     cx: 80,  cy: 136 },
-  { id: 'fb-r',  muscle: 'Biceps',     cx: 180, cy: 136 },
-  { id: 'ftr-l', muscle: 'Triceps',    cx: 68,  cy: 130 },
-  { id: 'ftr-r', muscle: 'Triceps',    cx: 192, cy: 130 },
-  { id: 'ff-l',  muscle: 'Forearms',   cx: 68,  cy: 172 },
-  { id: 'ff-r',  muscle: 'Forearms',   cx: 192, cy: 172 },
-  { id: 'fub-l', muscle: 'Upper Back', cx: 112, cy: 84  },
-  { id: 'fub-r', muscle: 'Upper Back', cx: 148, cy: 84  },
-  { id: 'fa-u',  muscle: 'Core',       cx: 130, cy: 136 },
-  { id: 'fa-m',  muscle: 'Core',       cx: 130, cy: 152 },
-  { id: 'fa-l',  muscle: 'Core',       cx: 130, cy: 170 },
-  { id: 'fo-l',  muscle: 'Core',       cx: 112, cy: 154 },
-  { id: 'fo-r',  muscle: 'Core',       cx: 148, cy: 154 },
-  { id: 'fq-l',  muscle: 'Legs',       cx: 114, cy: 236 },
-  { id: 'fq-r',  muscle: 'Legs',       cx: 146, cy: 236 },
-  { id: 'fca-l', muscle: 'Legs',       cx: 112, cy: 318 },
-  { id: 'fca-r', muscle: 'Legs',       cx: 148, cy: 318 },
-];
+// Masks per view; a group missing from a view isn't visible from that side
+const MASKS: Record<BodyView, Partial<Record<string, ImageSourcePropType>>> = {
+  front: {
+    Shoulders: require('../assets/muscles/front_shoulders.png'),
+    Chest:     require('../assets/muscles/front_chest.png'),
+    Biceps:    require('../assets/muscles/front_biceps.png'),
+    Forearms:  require('../assets/muscles/front_forearms.png'),
+    Core:      require('../assets/muscles/front_core.png'),
+    Legs:      require('../assets/muscles/front_legs.png'),
+  },
+  back: {
+    'Upper Back': require('../assets/muscles/back_upperback.png'),
+    'Lower Back': require('../assets/muscles/back_lowerback.png'),
+    Shoulders:    require('../assets/muscles/back_shoulders.png'),
+    Triceps:      require('../assets/muscles/back_triceps.png'),
+    Forearms:     require('../assets/muscles/back_forearms.png'),
+    Legs:         require('../assets/muscles/back_legs.png'),
+  },
+};
 
-const BACK_DOTS = [
-  // 2 points for Upper Back
-  { id: 'bub-l', muscle: 'Upper Back', cx: 114, cy: 116 },
-  { id: 'bub-r', muscle: 'Upper Back', cx: 146, cy: 116 },
-  // Shoulders (rear deltoids)
-  { id: 'bd-l',  muscle: 'Shoulders',  cx: 82,  cy: 104 },
-  { id: 'bd-r',  muscle: 'Shoulders',  cx: 178, cy: 104 },
-  // 2 points for Lower Back (lumbar / erector spinae)
-  { id: 'blb-l', muscle: 'Lower Back', cx: 118, cy: 168 },
-  { id: 'blb-r', muscle: 'Lower Back', cx: 142, cy: 168 },
-  // Triceps
-  { id: 'btr-l', muscle: 'Triceps',    cx: 74,  cy: 134 },
-  { id: 'btr-r', muscle: 'Triceps',    cx: 186, cy: 134 },
-  // Forearms
-  { id: 'bfr-l', muscle: 'Forearms',   cx: 68,  cy: 172 },
-  { id: 'bfr-r', muscle: 'Forearms',   cx: 192, cy: 172 },
-  // Legs: Glutes
-  { id: 'bg-l',  muscle: 'Legs',       cx: 114, cy: 208 },
-  { id: 'bg-r',  muscle: 'Legs',       cx: 146, cy: 208 },
-  // Legs: Hamstrings
-  { id: 'bh-l',  muscle: 'Legs',       cx: 114, cy: 268 },
-  { id: 'bh-r',  muscle: 'Legs',       cx: 146, cy: 268 },
-  // Legs: Calves
-  { id: 'bca-l', muscle: 'Legs',       cx: 112, cy: 326 },
-  { id: 'bca-r', muscle: 'Legs',       cx: 148, cy: 326 },
+/** Red shades for 1, 2, 3, 4, 5 and 6+ sets. */
+const SHADES: { color: string; opacity: number }[] = [
+  { color: '#FCA5A5', opacity: 0.55 },
+  { color: '#F87171', opacity: 0.6 },
+  { color: '#EF4444', opacity: 0.66 },
+  { color: '#DC2626', opacity: 0.74 },
+  { color: '#B91C1C', opacity: 0.8 },
+  { color: '#7F1D1D', opacity: 0.86 },
 ];
+const shadeFor = (sets: number) => SHADES[Math.min(sets, SHADES.length) - 1];
 
 function normalizeSetCounts(
   muscleSetCounts: Record<string, number>,
@@ -91,7 +72,7 @@ function normalizeSetCounts(
       else if (['upper back', 'trap', 'trapezius', 'rhomboid', 'lat'].some(x => lower.includes(x))) target = 'Upper Back';
       else if (['lower back', 'lumbar', 'erector'].some(x => lower.includes(x))) target = 'Lower Back';
       else if (lower === 'back') {
-        // legacy 'Back' â†’ light up both
+        // legacy 'Back' → light up both
         norm['Upper Back'] = (norm['Upper Back'] || 0) + count;
         norm['Lower Back'] = (norm['Lower Back'] || 0) + count;
         continue;
@@ -115,68 +96,75 @@ export default function BodyAnatomy({
 }: Props) {
   const { C, isDark } = useTheme();
   const [view, setView] = useState<BodyView>('front');
-  const normalizedCounts = normalizeSetCounts(muscleSetCounts, activeMuscleGroups);
-  const getSets = (muscle: string): number => normalizedCounts[muscle] || 0;
-
-  const getGreenColor = (sets: number): string => {
-    if (sets === 1) return '#4ADE80';
-    if (sets === 2) return '#22C55E';
-    if (sets === 3) return '#15803D';
-    return '#14532D';
-  };
-
-  const press = (m: string) => onSelectMuscle?.(m, getSets(m));
-  const dots = view === 'front' ? FRONT_DOTS : BACK_DOTS;
+  const counts = normalizeSetCounts(muscleSetCounts, activeMuscleGroups);
   const styles = makeStyles(C, isDark);
+
+  const masks = MASKS[view];
+  const trained = Object.entries(counts).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+  // Groups trained but only visible from the other side
+  const otherSide = trained.filter(([m]) => !masks[m]).map(([m]) => m);
 
   return (
     <View style={styles.container}>
       {showToggle && (
         <View style={styles.toggleRow}>
-          <TouchableOpacity style={[styles.btn, view === 'front' && styles.btnA]}
-            onPress={() => setView('front')} activeOpacity={0.85}>
-            <Text style={[styles.btnTxt, view === 'front' && styles.btnTxtA]}>Front</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, view === 'back' && styles.btnA]}
-            onPress={() => setView('back')} activeOpacity={0.85}>
-            <Text style={[styles.btnTxt, view === 'back' && styles.btnTxtA]}>Back</Text>
-          </TouchableOpacity>
+          {(['front', 'back'] as BodyView[]).map(v => (
+            <TouchableOpacity key={v} style={[styles.btn, view === v && styles.btnA]}
+              onPress={() => setView(v)} activeOpacity={0.85}>
+              <Text style={[styles.btnTxt, view === v && styles.btnTxtA]}>{v === 'front' ? 'Front' : 'Back'}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
       )}
 
-      <View style={{ width: W, height: H, borderRadius: 12, overflow: 'hidden', position: 'relative' }}>
+      <View style={{ width: W, height: H, borderRadius: 12, overflow: 'hidden' }}>
         <Image
           source={view === 'front' ? require('../assets/body_front.jpg') : require('../assets/body_back.jpg')}
           style={{ width: W, height: H, resizeMode: 'cover' }}
         />
-        <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={StyleSheet.absoluteFill} pointerEvents="box-none">
-          {dots.map(d => {
-            const s = getSets(d.muscle);
-            if (s <= 0) return null;
-            const color = getGreenColor(s);
-            return (
-              <G key={d.id}>
-                <Circle cx={d.cx} cy={d.cy} r={10} fill={color} fillOpacity={0.28} />
-                <Circle cx={d.cx} cy={d.cy} r={6} fill={color} stroke="#FFFFFF" strokeWidth={1.8} onPress={() => press(d.muscle)} />
-              </G>
-            );
-          })}
-        </Svg>
+        {trained.map(([muscle, sets]) => {
+          const src = masks[muscle];
+          if (!src) return null;
+          const shade = shadeFor(sets);
+          return (
+            <Image key={`${view}-${muscle}`} source={src} fadeDuration={0}
+              style={[StyleSheet.absoluteFill, { width: W, height: H, resizeMode: 'cover', tintColor: shade.color, opacity: shade.opacity }]} />
+          );
+        })}
       </View>
 
+      {otherSide.length > 0 && (
+        <TouchableOpacity onPress={() => setView(view === 'front' ? 'back' : 'front')} activeOpacity={0.7}>
+          <Text style={styles.otherSide}>
+            {otherSide.join(', ')} {otherSide.length === 1 ? 'is' : 'are'} on the {view === 'front' ? 'back' : 'front'} view. Tap to flip
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Trained muscles, tap for details */}
+      {trained.length > 0 && (
+        <View style={styles.chips}>
+          {trained.map(([muscle, sets]) => {
+            const shade = shadeFor(sets);
+            return (
+              <TouchableOpacity key={muscle} style={styles.chip} activeOpacity={0.8}
+                disabled={!onSelectMuscle} onPress={() => onSelectMuscle?.(muscle, sets)}>
+                <View style={[styles.chipDot, { backgroundColor: shade.color }]} />
+                <Text style={styles.chipTxt}>{muscle}</Text>
+                <Text style={styles.chipSets}>{sets} {sets === 1 ? 'set' : 'sets'}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
       <View style={styles.legendWrap}>
-        <Text style={styles.legendTitle}>Set Volume Intensity (Green Scale)</Text>
-        <View style={styles.legendRow}>
-          {[
-            { label: '0 Sets',  bg: isDark ? '#2A3347' : '#E5E7EB', border: true },
-            { label: '1 Set',   bg: '#4ADE80' },
-            { label: '2 Sets',  bg: '#22C55E' },
-            { label: '3 Sets',  bg: '#15803D' },
-            { label: '4+ Sets', bg: '#14532D' },
-          ].map((item: any) => (
-            <View key={item.label} style={styles.legendItem}>
-              <View style={[styles.legendBox, { backgroundColor: item.bg }, item.border && { borderWidth: 1, borderColor: C.border }]} />
-              <Text style={styles.legendTxt}>{item.label}</Text>
+        <Text style={styles.legendTitle}>Sets per muscle</Text>
+        <View style={styles.scaleRow}>
+          {SHADES.map((s, i) => (
+            <View key={i} style={styles.scaleCell}>
+              <View style={[styles.scaleBox, { backgroundColor: s.color }]} />
+              <Text style={styles.legendTxt}>{i === SHADES.length - 1 ? `${i + 1}+` : i + 1}</Text>
             </View>
           ))}
         </View>
@@ -193,13 +181,17 @@ function makeStyles(C: any, isDark: boolean) {
     btnA:        { backgroundColor: C.accent, shadowColor: C.accent, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 3 },
     btnTxt:      { fontSize: 13, fontWeight: '700', color: C.muted },
     btnTxtA:     { color: '#FFFFFF' },
+    otherSide:   { fontSize: 12, fontWeight: '600', color: C.accent, marginTop: 10, textAlign: 'center' },
+    chips:       { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6, marginTop: 12 },
+    chip:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
+    chipDot:     { width: 10, height: 10, borderRadius: 5 },
+    chipTxt:     { fontSize: 12, fontWeight: '700', color: C.text },
+    chipSets:    { fontSize: 11, fontWeight: '600', color: C.muted },
     legendWrap:  { width: '100%', marginTop: 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border, alignItems: 'center' },
     legendTitle: { fontSize: 11, fontWeight: '700', color: C.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 },
-    legendRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' },
-    legendItem:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    legendBox:   { width: 12, height: 12, borderRadius: 3 },
+    scaleRow:    { flexDirection: 'row', gap: 4 },
+    scaleCell:   { alignItems: 'center', gap: 4 },
+    scaleBox:    { width: 30, height: 10, borderRadius: 3 },
     legendTxt:   { fontSize: 11, fontWeight: '600', color: C.textSub },
   });
 }
-
-

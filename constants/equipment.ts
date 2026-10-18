@@ -111,7 +111,7 @@ export function isBodyweightExercise(name: string): boolean {
 }
 
 /** What an exercise is loaded with, from the starting-weight table, its equipment, or its name. */
-function loadTypeOf(name: string): LoadType | 'free' {
+export function loadTypeOf(name: string): LoadType | 'free' {
   const load = LOADS[name];
   if (load) return load[0];
   const req = REQ[name] ?? [];

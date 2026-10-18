@@ -1182,7 +1182,7 @@ export default function WorkoutsScreen() {
                     )}
                   </View>
                   <Text style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
-                    Green intensity increases with sets completed (1 set light green, 4+ sets deep emerald).
+                    Each muscle you trained turns red. The more sets, the deeper the red (1 set light, 6+ sets darkest).
                   </Text>
 
                   {/* Body Vector Anatomy with Set Volume Heatmap */}
@@ -1353,37 +1353,56 @@ export default function WorkoutsScreen() {
       </NeuModal>
 
       {/* ── PR Celebration Overlay ── */}
-      {prData && (
-        <View style={styles.prOverlay}>
-          <View style={styles.prCard}>
-            <Text style={{ fontSize: 52, textAlign: 'center' }}>🏆</Text>
-            <Text style={styles.prTitle}>NEW PERSONAL{'\n'}RECORD!</Text>
-            <Text style={styles.prExercise}>{prData.exercise}</Text>
-            <View style={styles.prDivider} />
-            {isRepsOnly(prData.exercise) ? (
-              <>
-                {prData.oldPR && <Text style={styles.prOld}>Previous: {prData.oldPR.reps} reps</Text>}
-                <Text style={styles.prNew}>{prData.reps} reps</Text>
-              </>
-            ) : (
-              <>
-                {prData.oldPR && (
-                  <Text style={styles.prOld}>
-                    Previous: {prData.oldPR.weight}kg × {prData.oldPR.reps} reps
-                  </Text>
+      <Modal visible={!!prData} transparent animationType="fade" onRequestClose={() => setPrData(null)}>
+        {prData && (() => {
+          const reps = isRepsOnly(prData.exercise);
+          const lift = (w: number, r: number) => (reps ? `${r} reps` : `${w} kg × ${r}`);
+          const old = prData.oldPR;
+          const gain = old ? prData.new1RM - old.one_rep_max : 0;
+          return (
+            <View style={styles.prOverlay}>
+              <View style={styles.prCard}>
+                <View style={styles.prBadge}>
+                  <Ionicons name="trophy" size={30} color={C.yellow} />
+                </View>
+                <Text style={styles.prKicker}>NEW PERSONAL RECORD</Text>
+                <Text style={styles.prExercise}>{prData.exercise}</Text>
+
+                <View style={styles.prCompare}>
+                  {old && (
+                    <>
+                      <View style={styles.prBox}>
+                        <Text style={styles.prBoxLabel}>Before</Text>
+                        <Text style={styles.prBoxOld}>{lift(old.weight, old.reps)}</Text>
+                      </View>
+                      <Ionicons name="arrow-forward" size={18} color={C.muted} />
+                    </>
+                  )}
+                  <View style={[styles.prBox, styles.prBoxNewWrap]}>
+                    <Text style={[styles.prBoxLabel, { color: C.green }]}>{old ? 'Now' : 'First record'}</Text>
+                    <Text style={styles.prBoxNew}>{lift(prData.weight, prData.reps)}</Text>
+                  </View>
+                </View>
+
+                {!reps && (
+                  <View style={styles.prStat}>
+                    <Text style={styles.prStatLabel}>Estimated 1-rep max</Text>
+                    <Text style={styles.prStatValue}>{+prData.new1RM.toFixed(1)} kg</Text>
+                    {gain > 0 && <Text style={styles.prGain}>+{+gain.toFixed(1)} kg</Text>}
+                  </View>
                 )}
-                <Text style={styles.prNew}>
-                  {prData.weight}kg × {prData.reps} reps
-                </Text>
-                <Text style={styles.pr1rm}>e1RM: {prData.new1RM.toFixed(1)} kg</Text>
-              </>
-            )}
-            <View style={{ width: '100%', marginTop: 8 }}>
-              <Btn label="Let's Go! 🎉" color={C.accent} onPress={() => setPrData(null)} />
+                {reps && old && prData.reps > old.reps && (
+                  <Text style={styles.prGain}>+{prData.reps - old.reps} reps on your best</Text>
+                )}
+
+                <TouchableOpacity style={styles.prBtn} onPress={() => setPrData(null)} activeOpacity={0.85}>
+                  <Text style={styles.prBtnText}>Keep going</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </View>
-      )}
+          );
+        })()}
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1893,47 +1912,46 @@ function makeStyles(C: any) { return StyleSheet.create({
   },
   // PR overlay
   prOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(40,50,70,0.4)',
+    flex: 1,
+    backgroundColor: 'rgba(15,20,30,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: 24,
   },
   prCard: {
     backgroundColor: C.card,
     borderRadius: 24,
-    padding: 28,
-    width: '85%',
+    paddingHorizontal: 22,
+    paddingTop: 26,
+    paddingBottom: 20,
+    width: '100%',
+    maxWidth: 360,
     alignItems: 'center',
-    gap: 8,
-    shadowColor: '#BFC8D6',
-    shadowOffset: { width: 8, height: 8 },
-    shadowOpacity: 0.95,
-    shadowRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
     elevation: 16,
   },
-  prTitle: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: C.yellow,
-    textAlign: 'center',
-    letterSpacing: 0.5,
+  prBadge: {
+    width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.yellow + '22', borderWidth: 2, borderColor: C.yellow + '55', marginBottom: 12,
   },
-  prExercise: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: C.text,
-    textAlign: 'center',
+  prKicker: { fontSize: 11, fontWeight: '800', color: C.yellow, letterSpacing: 1.2 },
+  prExercise: { fontSize: 19, fontWeight: '800', color: C.text, textAlign: 'center', marginTop: 4, marginBottom: 18 },
+  prCompare: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'stretch', justifyContent: 'center' },
+  prBox: {
+    flex: 1, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 6,
+    backgroundColor: C.bg, borderRadius: 14, borderWidth: 1, borderColor: C.border,
   },
-  prDivider: {
-    width: '80%',
-    height: 1,
-    backgroundColor: C.border,
-    marginVertical: 4,
-  },
-  prOld: { fontSize: 13, color: C.muted },
-  prNew: { fontSize: 20, fontWeight: '800', color: C.green },
-  pr1rm: { fontSize: 16, fontWeight: '700', color: C.accent },
+  prBoxNewWrap: { backgroundColor: C.green + '14', borderColor: C.green + '55' },
+  prBoxLabel: { fontSize: 10, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4 },
+  prBoxOld: { fontSize: 15, fontWeight: '700', color: C.textSub },
+  prBoxNew: { fontSize: 17, fontWeight: '800', color: C.green },
+  prStat: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14 },
+  prStatLabel: { fontSize: 13, color: C.muted, fontWeight: '600' },
+  prStatValue: { fontSize: 15, color: C.text, fontWeight: '800' },
+  prGain: { fontSize: 12, fontWeight: '800', color: C.green, marginTop: 2 },
+  prBtn: { alignSelf: 'stretch', marginTop: 20, paddingVertical: 14, borderRadius: 14, backgroundColor: C.accent, alignItems: 'center' },
+  prBtnText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
 }); }
 
 // ─────────────────────────────────────────────────────────────────────────────
