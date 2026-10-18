@@ -11,6 +11,7 @@ import {
   Modal,
   LayoutChangeEvent,
   Image,
+  Pressable,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -133,20 +134,19 @@ function muscleInsights(logs: ExerciseLog[], tracker: MuscleEntry[]): MuscleInsi
 // this screen, with grouped support)
 // ─────────────────────────────────────────────────────────────────────────────
 function NeuModal({
-  visible, title, onClose, children, fullScreen,
+  visible, title, onClose, children, fullScreen, fit,
 }: {
   visible: boolean; title: string; onClose: () => void; children: React.ReactNode; fullScreen?: boolean;
+  fit?: boolean;  // grow to fit the content (up to 90%) instead of the 60% cap
 }) {
   const { C } = useTheme();
   const neuStyles = makeNeuStyles(C);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={neuStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity
-          activeOpacity={1}
-          style={[neuStyles.sheet, fullScreen && neuStyles.sheetFull]}
-          onPress={e => e.stopPropagation()}
-        >
+      {/* Backdrop behind the sheet, so lists inside the sheet scroll from anywhere */}
+      <View style={neuStyles.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+        <View style={[neuStyles.sheet, fullScreen && neuStyles.sheetFull, fit && { maxHeight: '90%' }]}>
           <View style={neuStyles.handle} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text style={neuStyles.sheetTitle}>{title}</Text>
@@ -154,11 +154,12 @@ function NeuModal({
               <Ionicons name="close-circle" size={24} color={C.muted} />
             </TouchableOpacity>
           </View>
-          <View style={fullScreen ? { flex: 1 } : {}}>
+          {/* flexShrink lets a ScrollView inside stay within the sheet's max height */}
+          <View style={fullScreen ? { flex: 1 } : { flexShrink: 1 }}>
             {children}
           </View>
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -485,6 +486,23 @@ function MuscleGroupAccordion({
   const mgColor = MUSCLE_DISTINCT_COLORS[muscle] || C.mg[muscle] || C.accent;
   const [localExpanded, setLocalExpanded] = useState(false);
   const expanded = expandAll || localExpanded;
+  // Opening a group shows the first card straight away and adds the rest a frame at a time,
+  // so the tap responds instantly instead of waiting for every card to build
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    if (!expanded) { setShown(0); return; }
+    let n = 1;
+    setShown(1);
+    let raf: number;
+    const more = () => {
+      if (n >= exercises.length) return;
+      n += 1;
+      setShown(n);
+      raf = requestAnimationFrame(more);
+    };
+    raf = requestAnimationFrame(more);
+    return () => cancelAnimationFrame(raf);
+  }, [expanded, exercises.length]);
 
   const doneCount = exercises.filter(ex =>
     loggedSets.some(s => s.name === ex.exercise_name)
@@ -568,7 +586,7 @@ function MuscleGroupAccordion({
       {/* Expanded exercise cards */}
       {expanded && (
         <>
-          {exercises.map(ex => (
+          {exercises.slice(0, Math.max(shown, 1)).map(ex => (
             <ExerciseLogCard
               key={ex.id}
               ex={ex}
@@ -656,14 +674,18 @@ function ExerciseLogCard({
   const [repsOnly] = useState(() => isRepsOnly(name));
   // The weights this exercise can actually be done with (dumbbell sizes, 5 kg machine steps...)
   const [steps] = useState(() => weightStepsFor(name));
-  const [feedback, setFeedback] = useState(() => getLoadFeedback(name));
-  // What the split builder set for this exercise today, shown as the goal. A 👍 / 👎 from an
-  // earlier session moves the weight to the one picked then.
-  const [target] = useState(() => {
-    const t = targetFor(getSplitConfig(), ex.day_of_week, name);
+  // Everything read from storage once, when the card mounts (keeps opening a group quick)
+  const [init] = useState(() => {
     const fb = getLoadFeedback(name);
-    return t && t.kg !== undefined && fb && fb.date < todayStr() ? withKg(t, fb.kg) : t;
+    const t = targetFor(getSplitConfig(), ex.day_of_week, name);
+    // What the split builder set for this exercise today, shown as the goal. A 👍 / 👎 from an
+    // earlier session moves the weight to the one picked then.
+    const target = t && t.kg !== undefined && fb && fb.date < todayStr() ? withKg(t, fb.kg) : t;
+    const startKg = fb?.kg ?? target?.kg ?? getLastWeight(name) ?? 20;
+    return { fb, target, startKg, photos: findExercise(name)?.images };
   });
+  const [feedback, setFeedback] = useState(init.fb);
+  const target = init.target;
   // Sets go one at a time: the counter moves on by itself after each log
   const doneSets = loggedSets.reduce((n, s) => n + (s.sets || 1), 0);
   const goalSets = target?.sets;
@@ -673,13 +695,12 @@ function ExerciseLogCard({
   const [reps, setReps] = useState(() => Number(target?.reps.match(/^(\d+)(?:–\d+)?$/)?.[1] ?? 8));
   // The recommended weight is on the wheel, ready to log or scroll to change: the latest feedback,
   // else the plan, else what was logged last time
-  const [kg, setKg] = useState(() =>
-    closestOnLadder(getLoadFeedback(name)?.kg ?? target?.kg ?? getLastWeight(name) ?? 20, steps));
+  const [kg, setKg] = useState(() => closestOnLadder(init.startKg, steps));
   const [vote, setVote] = useState<Vote | null>(null);  // the pop-up being shown
 
   // Start exercise opens the full-screen set page; it logs each set as it's finished
   const [sessionOpen, setSessionOpen] = useState(false);
-  const [photos] = useState(() => findExercise(name)?.images);
+  const photos = init.photos;
   const [guideOpen, setGuideOpen] = useState(false);
   const logFromSession = (r: number, w: number) => {
     onLog(1, r, w);
@@ -849,7 +870,8 @@ function ExerciseLogCard({
         )}
       </View>
 
-      <SetSession
+      {/* Mounted only while open, so closed cards stay light */}
+      {sessionOpen && <SetSession
         visible={sessionOpen}
         name={name}
         color={muscleColor}
@@ -863,15 +885,17 @@ function ExerciseLogCard({
         onLog={logFromSession}
         onChange={(r, w) => { setReps(r); if (!repsOnly) setKg(w); }}
         onClose={() => setSessionOpen(false)}
-      />
+      />}
 
       {/* Felt strong / too heavy → how much to change the weight */}
-      <NeuModal visible={vote !== null} title={vote === 'up' ? 'Nice lift!' : 'Too heavy today?'} onClose={() => setVote(null)}>
+      <NeuModal visible={vote !== null} title={vote === 'up' ? 'Nice lift!' : 'Too heavy today?'} onClose={() => setVote(null)} fit>
         {vote && (
-          <WeightChange
-            up={vote === 'up'} usedKg={usedKg} options={vote === 'up' ? heavier : lighter}
-            onPick={nextKg => choose(vote, nextKg)}
-          />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+            <WeightChange
+              up={vote === 'up'} usedKg={usedKg} options={vote === 'up' ? heavier : lighter}
+              onPick={nextKg => choose(vote, nextKg)}
+            />
+          </ScrollView>
         )}
       </NeuModal>
     </Card>

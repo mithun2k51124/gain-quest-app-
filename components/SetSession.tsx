@@ -15,7 +15,6 @@ import { LoopingThumb } from './ExerciseGuide';
 type Phase = 'set' | 'rate' | 'next';
 
 const PREVIEW_KEY = 'set_preview_always';
-const AUTO_BACK_S = 5;
 
 const mmss = (ms: number) => {
   const s = Math.floor(ms / 1000);
@@ -90,18 +89,6 @@ export function SetSession({
     setTimeout(() => setHint(null), 1800);
   };
 
-  // After a set: rest. If no thumb is tapped, close after AUTO_BACK_S and land on the Log tab
-  const [autoLeft, setAutoLeft] = useState(AUTO_BACK_S);
-  useEffect(() => {
-    if (!visible || phase !== 'rate') return;
-    setAutoLeft(AUTO_BACK_S);
-    const id = setInterval(() => setAutoLeft(s => s - 1), 1000);
-    return () => clearInterval(id);
-  }, [visible, phase]);
-  useEffect(() => {
-    if (phase === 'rate' && autoLeft <= 0) onClose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoLeft, phase]);
 
   const setNo = phase === 'set' ? doneSets + 1 : doneSets;   // after logging, doneSets includes it
   const allDone = goalSets !== undefined && doneSets >= goalSets;
@@ -246,10 +233,9 @@ export function SetSession({
 
             {phase === 'rate' ? (
               <View style={styles.center}>
-                <Ionicons name="cafe-outline" size={30} color={color} />
-                <Text style={[styles.question, { marginTop: 8 }]}>Rest now</Text>
+                <Text style={styles.question}>Nice set!</Text>
                 <Text style={styles.questionSub}>
-                  How was that set? Tap one for a {repsOnly ? 'reps' : 'weight'} suggestion, or skip it.
+                  How was that set? Tap one for a {repsOnly ? 'reps' : 'weight'} suggestion, or just rest.
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 12, alignSelf: 'stretch', marginTop: 24 }}>
                   <TouchableOpacity style={[styles.thumb, { borderColor: C.green + '66', backgroundColor: C.green + '14' }]}
@@ -269,13 +255,6 @@ export function SetSession({
                     <Text style={styles.thumbSub}>It was a struggle</Text>
                   </TouchableOpacity>
                 </View>
-                {/* No answer: back to the Log tab after a few seconds, ready for the next set */}
-                <View style={[styles.autoTrack, { backgroundColor: color + '22' }]}>
-                  <View style={[styles.autoFill, { backgroundColor: color, width: `${(autoLeft / AUTO_BACK_S) * 100}%` }]} />
-                </View>
-                <TouchableOpacity onPress={onClose} activeOpacity={0.7} style={{ paddingVertical: 10 }}>
-                  <Text style={styles.autoTxt}>Back to the log in {autoLeft}s · <Text style={{ color: C.accent }}>Go now</Text></Text>
-                </TouchableOpacity>
               </View>
             ) : next && (
               <View style={styles.center}>
@@ -291,6 +270,15 @@ export function SetSession({
                 {change === 0 && <Text style={[styles.nextChange, { color: C.muted }]}>Same as this set</Text>}
                 {!repsOnly && <Text style={styles.questionSub}>{next.reps} reps</Text>}
               </View>
+            )}
+
+            {/* Back to the Log tab to rest; the card is ready for the next set */}
+            {phase === 'rate' && (
+              <TouchableOpacity style={[styles.primary, { backgroundColor: color }]} onPress={onClose} activeOpacity={0.85}
+                accessibilityLabel="Rest now">
+                <Ionicons name="cafe" size={22} color="#fff" />
+                <Text style={styles.primaryTxt}>Rest now</Text>
+              </TouchableOpacity>
             )}
 
             {phase === 'next' && next && (
@@ -347,9 +335,6 @@ function makeStyles(C: any) {
     miniClockTxt: { fontSize: 20, fontWeight: '300', color: '#fff', fontVariant: ['tabular-nums'], letterSpacing: 1 },
     hint:       { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, backgroundColor: C.card, marginBottom: 4 },
     hintTxt:    { fontSize: 12, fontWeight: '700', color: C.textSub },
-    autoTrack:  { alignSelf: 'stretch', height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 22 },
-    autoFill:   { height: '100%', borderRadius: 2 },
-    autoTxt:    { fontSize: 13, fontWeight: '700', color: C.muted },
     timerRing:  {
       width: '92%', aspectRatio: 1, maxWidth: 340, borderRadius: 999, borderWidth: 3, alignItems: 'center', justifyContent: 'center',
       backgroundColor: C.card, shadowOpacity: 0.4, shadowRadius: 24, shadowOffset: { width: 0, height: 0 }, elevation: 8,
