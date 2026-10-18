@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Animated, Image, useWindowDimensions,
+  ImageSourcePropType,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { findExercise, CatalogExercise } from '../constants/exerciseCatalog';
@@ -17,6 +18,32 @@ export function findExerciseGuide(name: string): ExerciseGuide | undefined {
 const HIT = { top: 10, bottom: 10, left: 10, right: 10 };
 const HOLD_MS = 1100;
 const FADE_MS = 380;
+
+/** Small always-playing version of MotionPreview, for cards (no controls). */
+export function LoopingThumb({ images, width, height }: { images: ImageSourcePropType[]; width: number; height: number }) {
+  const fade = useRef(new Animated.Value(0)).current;
+  const two = images.length > 1;
+  useEffect(() => {
+    if (!two) return;
+    const loop = Animated.loop(Animated.sequence([
+      Animated.delay(HOLD_MS),
+      Animated.timing(fade, { toValue: 1, duration: FADE_MS, useNativeDriver: true }),
+      Animated.delay(HOLD_MS),
+      Animated.timing(fade, { toValue: 0, duration: FADE_MS, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [two, fade]);
+  return (
+    <View style={{ width, height }}>
+      <Image source={images[0]} style={{ width, height }} resizeMode="cover" />
+      {two && (
+        <Animated.Image source={images[1]} resizeMode="cover"
+          style={[StyleSheet.absoluteFill, { width, height, opacity: fade }]} />
+      )}
+    </View>
+  );
+}
 
 /** Loops between the start and end photos with a crossfade, like a two-frame animation. */
 function MotionPreview({ guide, width, color }: { guide: ExerciseGuide; width: number; color: string }) {
