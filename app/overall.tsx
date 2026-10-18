@@ -13,7 +13,7 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Rect, Path, Circle, G, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   getTodayLog,
   getGoals,
@@ -208,9 +208,19 @@ const STADIUM_GEOMETRIES = TRACK_CONFIGS.map((cfg) => {
 
 // ── Custom SVG Icons ─────────────────────────────────────────────────────────
 // Premium SVG icons matching dark theme (used in the legend dots area)
+const FILLED_ICONS: Partial<Record<MetricId, keyof typeof MaterialCommunityIcons.glyphMap>> = {
+  calories: 'fire',
+  protein: 'food-drumstick',
+  water: 'cup-water',
+};
+
 function MetricSvgIcon({ metricId, size = 20, color }: { metricId: MetricId; size?: number; color: string }) {
   const s = size;
   const half = s / 2;
+
+  // Calories, protein and water use clear, filled icons
+  const filled = FILLED_ICONS[metricId];
+  if (filled) return <MaterialCommunityIcons name={filled} size={s} color={color} />;
 
   switch (metricId) {
     case 'calories':
@@ -391,6 +401,7 @@ export default function OverallScreen() {
   const [weekly, setWeekly] = useState<any>(null);
   const [weight, setWeight] = useState<number | null>(null);
   const [refresh, setRefresh] = useState(false);
+  const [customizing, setCustomizing] = useState(false);  // ring setup panel in the rings card
 
   // Selected metrics for the 3 concentric rings
   const [selectedMetrics, setSelectedMetrics] = useState<MetricId[]>(() => {
@@ -476,7 +487,7 @@ export default function OverallScreen() {
         target = goals.calorie_goal || 2500;
         pct = target > 0 ? Math.min(current / target, 1) : 0;
         valueStr = `${current.toLocaleString()} / ${target.toLocaleString()} kcal`;
-        subText = current >= target ? 'Target achieved! 🎉' : `${(target - current).toLocaleString()} kcal left`;
+        subText = current >= target ? 'Target achieved' : `${(target - current).toLocaleString()} kcal left`;
         isDone = current >= target;
         break;
       }
@@ -485,7 +496,7 @@ export default function OverallScreen() {
         target = goals.water_goal || 3.0;
         pct = target > 0 ? Math.min(current / target, 1) : 0;
         valueStr = `${current.toFixed(2)} / ${target.toFixed(1)} L`;
-        subText = current >= target ? 'Hydration goal hit! 💧' : `${Math.max(0, target - current).toFixed(2)} L remaining`;
+        subText = current >= target ? 'Hydration goal hit' : `${Math.max(0, target - current).toFixed(2)} L remaining`;
         isDone = current >= target;
         break;
       }
@@ -494,7 +505,7 @@ export default function OverallScreen() {
         target = goals.protein_goal || 120;
         pct = target > 0 ? Math.min(current / target, 1) : 0;
         valueStr = `${current} / ${target} g`;
-        subText = current >= target ? 'Protein target hit! 🥩' : `${Math.max(0, target - current)}g more needed`;
+        subText = current >= target ? 'Protein target hit' : `${Math.max(0, target - current)}g more needed`;
         isDone = current >= target;
         break;
       }
@@ -510,7 +521,7 @@ export default function OverallScreen() {
         const done = !!log.workout_completed;
         pct = done ? 1 : 0;
         valueStr = done ? 'Completed ✓' : 'Pending';
-        subText = done ? 'Session completed 🔥' : 'Crush your training today';
+        subText = done ? 'Session completed' : 'Crush your training today';
         isDone = done;
         break;
       }
@@ -518,7 +529,7 @@ export default function OverallScreen() {
         const slept = !!log.slept_well;
         pct = slept ? 1 : 0;
         valueStr = slept ? 'Rested ✓' : 'Pending';
-        subText = slept ? 'Recovery optimized 🌙' : 'Log rest in tracker';
+        subText = slept ? 'Recovery logged' : 'Log rest in tracker';
         isDone = slept;
         break;
       }
@@ -536,7 +547,7 @@ export default function OverallScreen() {
         target = 5;
         pct = target > 0 ? Math.min(current / target, 1) : 0;
         valueStr = `${current} / ${target} sessions`;
-        subText = current >= target ? 'Weekly goal done! 🏆' : `${target - current} more to go`;
+        subText = current >= target ? 'Weekly goal done' : `${target - current} more to go`;
         isDone = current >= target;
         break;
       }
@@ -607,8 +618,20 @@ export default function OverallScreen() {
           {/* Card top row */}
           <View style={styles.trackCardTop}>
             <Text style={styles.trackCardTitle}>Activity Rings</Text>
-            <View style={styles.trackScoreBadge}>
-              <Text style={styles.trackScoreBadgeTxt}>{targetsCompletedCount}/3 Done</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={styles.trackScoreBadge}>
+                <Text style={styles.trackScoreBadgeTxt}>{targetsCompletedCount}/3 Done</Text>
+              </View>
+              {/* Ring setup lives here, in the rings card */}
+              <TouchableOpacity
+                style={[styles.ringEditBtn, customizing && { backgroundColor: C.accent, borderColor: C.accent }]}
+                onPress={() => setCustomizing(v => !v)}
+                activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Customize rings"
+              >
+                <Ionicons name={customizing ? 'close' : 'options-outline'} size={16} color={customizing ? '#fff' : C.accent} />
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -690,6 +713,61 @@ export default function OverallScreen() {
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* ── Ring setup (opens from the button in the card's top row) ── */}
+          {customizing && (
+            <View style={styles.ringSetup}>
+              <View style={styles.customizeTopRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.customizeTitle}>Customize rings</Text>
+                  <Text style={styles.customizeSub}>Pick a preset or choose what each ring shows</Text>
+                </View>
+                <TouchableOpacity onPress={handleResetDefaults} style={styles.resetBtn} activeOpacity={0.75}>
+                  <Ionicons name="refresh-outline" size={13} color={C.accent} style={{ marginRight: 3 }} />
+                  <Text style={styles.resetBtnTxt}>Reset</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.presetRow}>
+                {PRESETS.map((p) => (
+                  <TouchableOpacity
+                    key={p.label}
+                    style={styles.presetChip}
+                    onPress={() => handleApplyPreset(p.keys)}
+                    activeOpacity={0.75}
+                  >
+                    <Ionicons name={p.icon} size={14} color={C.accent} style={{ marginRight: 4 }} />
+                    <Text style={styles.presetChipTxt}>{p.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={styles.slotsList}>
+                {activeRings.map((ring) => (
+                  <TouchableOpacity
+                    key={`slot-${ring.slotIndex}`}
+                    style={styles.slotRow}
+                    activeOpacity={0.8}
+                    onPress={() => setPickerSlot(ring.slotIndex)}
+                  >
+                    <View style={[styles.slotColorBar, { backgroundColor: ring.color }]} />
+                    <View style={styles.slotInfo}>
+                      <Text style={styles.slotTierName}>{ring.slotName}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <MetricSvgIcon metricId={ring.id} size={16} color={ring.color} />
+                        <Text style={[styles.slotMetricName, { color: ring.color }]}>{ring.label}</Text>
+                        <Text style={styles.slotMetricVal}>{ring.valueStr}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.slotChangeBtn}>
+                      <Text style={styles.slotChangeBtnTxt}>Change</Text>
+                      <Ionicons name="chevron-forward" size={14} color={C.accent} />
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
         </View>
 
         {/* ── Score Banner ── */}
@@ -701,10 +779,10 @@ export default function OverallScreen() {
           <View style={styles.scoreBannerDivider} />
           <View style={styles.scoreBannerRight}>
             <Text style={styles.scoreBannerTitle}>
-              {score >= 90 ? 'Outstanding Day! 🏆'
-                : score >= 70 ? 'Great Progress! 🔥'
-                : score >= 40 ? 'Keep Pushing! 💪'
-                : 'Just Getting Started ⚡'}
+              {score >= 90 ? 'Outstanding day'
+                : score >= 70 ? 'Great progress'
+                : score >= 40 ? 'Keep pushing'
+                : 'Just getting started'}
             </Text>
             <Text style={styles.scoreBannerSub}>
               {streak?.current_streak
@@ -766,65 +844,6 @@ export default function OverallScreen() {
             </View>
           </TouchableOpacity>
         ))}
-
-        {/* ── Customize Section ── */}
-        <View style={{ marginTop: 14 }}>
-          <SectionHeader title="Customize Rings" />
-        </View>
-
-        <View style={styles.customizeCard}>
-          <View style={styles.customizeTopRow}>
-            <View>
-              <Text style={styles.customizeTitle}>Ring Configuration</Text>
-              <Text style={styles.customizeSub}>Choose what each track ring displays</Text>
-            </View>
-            <TouchableOpacity onPress={handleResetDefaults} style={styles.resetBtn} activeOpacity={0.75}>
-              <Ionicons name="refresh-outline" size={13} color={C.accent} style={{ marginRight: 3 }} />
-              <Text style={styles.resetBtnTxt}>Reset</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Preset chips */}
-          <View style={styles.presetRow}>
-            {PRESETS.map((p) => (
-              <TouchableOpacity
-                key={p.label}
-                style={styles.presetChip}
-                onPress={() => handleApplyPreset(p.keys)}
-                activeOpacity={0.75}
-              >
-                <Ionicons name={p.icon} size={14} color={C.accent} style={{ marginRight: 4 }} />
-                <Text style={styles.presetChipTxt}>{p.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* 3 Ring Slots */}
-          <View style={styles.slotsList}>
-            {activeRings.map((ring) => (
-              <TouchableOpacity
-                key={`slot-${ring.slotIndex}`}
-                style={styles.slotRow}
-                activeOpacity={0.8}
-                onPress={() => setPickerSlot(ring.slotIndex)}
-              >
-                <View style={[styles.slotColorBar, { backgroundColor: ring.color }]} />
-                <View style={styles.slotInfo}>
-                  <Text style={styles.slotTierName}>{ring.slotName}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                    <MetricSvgIcon metricId={ring.id} size={16} color={ring.color} />
-                    <Text style={[styles.slotMetricName, { color: ring.color }]}>{ring.label}</Text>
-                    <Text style={styles.slotMetricVal}>{ring.valueStr}</Text>
-                  </View>
-                </View>
-                <View style={styles.slotChangeBtn}>
-                  <Text style={styles.slotChangeBtnTxt}>Change</Text>
-                  <Ionicons name="chevron-forward" size={14} color={C.accent} />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
 
         <View style={{ height: 32 }} />
       </ScrollView>
@@ -1224,18 +1243,15 @@ function makeStyles(C: any, isDark: boolean) {
     },
 
     // ── Customize Section ──
-    customizeCard: {
-      backgroundColor: C.card,
-      borderRadius: 20,
-      padding: 16,
-      borderWidth: 1,
-      borderColor: C.border,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 3 },
-      shadowOpacity: 0.06,
-      shadowRadius: 6,
-      elevation: 2,
-      marginBottom: 14,
+    ringSetup: {
+      marginTop: 14,
+      paddingTop: 14,
+      borderTopWidth: 1,
+      borderTopColor: C.border,
+    },
+    ringEditBtn: {
+      width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.accent + '14', borderWidth: 1, borderColor: C.accent + '40',
     },
     customizeTopRow: {
       flexDirection: 'row',
