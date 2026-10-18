@@ -39,6 +39,11 @@ const MASKS: Record<BodyView, Partial<Record<string, ImageSourcePropType>>> = {
   },
 };
 
+// Side columns: upper body on the left, lower body on the right
+const UPPER = ['Chest', 'Shoulders', 'Upper Back', 'Biceps', 'Triceps', 'Forearms'];
+const LOWER = ['Core', 'Lower Back', 'Legs'];
+const SIDE_W = 74;
+
 /** Reds for 1, 2, 3, 4 and 5+ sets: light red deepening to dark red. */
 export const SHADES: { color: string; opacity: number }[] = [
   { color: '#F25C54', opacity: 0.6 },
@@ -103,6 +108,34 @@ export default function BodyAnatomy({
   // Groups trained but only visible from the other side
   const otherSide = trained.filter(([m]) => !masks[m]).map(([m]) => m);
 
+  // The body shrinks to leave room for a muscle column on each side
+  const [rowW, setRowW] = useState(0);
+  const bw = rowW ? Math.max(150, Math.min(W, rowW - 2 * (SIDE_W + 8))) : 200;
+  const bh = Math.round(bw * (H / W));
+
+  const renderSide = (title: string, group: string[]) => {
+    const list = trained.filter(([m]) => group.includes(m));
+    return (
+      <View style={styles.side}>
+        <Text style={styles.sideTitle}>{title}</Text>
+        {list.length === 0 && <Text style={styles.sideNone}>Not trained</Text>}
+        {list.map(([muscle, sets]) => {
+          const shade = shadeFor(sets);
+          return (
+            <TouchableOpacity key={muscle} style={styles.sideItem} activeOpacity={0.8}
+              disabled={!onSelectMuscle} onPress={() => onSelectMuscle?.(muscle, sets)}>
+              <View style={[styles.chipDot, { backgroundColor: shade.color }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.chipTxt} numberOfLines={1} adjustsFontSizeToFit>{muscle}</Text>
+                <Text style={styles.chipSets}>{sets} {sets === 1 ? 'set' : 'sets'}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       {showToggle && (
@@ -116,20 +149,25 @@ export default function BodyAnatomy({
         </View>
       )}
 
-      <View style={{ width: W, height: H, borderRadius: 12, overflow: 'hidden' }}>
-        <Image
-          source={view === 'front' ? require('../assets/body_front.jpg') : require('../assets/body_back.jpg')}
-          style={{ width: W, height: H, resizeMode: 'cover' }}
-        />
-        {trained.map(([muscle, sets]) => {
-          const src = masks[muscle];
-          if (!src) return null;
-          const shade = shadeFor(sets);
-          return (
-            <Image key={`${view}-${muscle}`} source={src} fadeDuration={0}
-              style={[StyleSheet.absoluteFill, { width: W, height: H, resizeMode: 'cover', tintColor: shade.color, opacity: shade.opacity }]} />
-          );
-        })}
+      {/* Upper-body muscles on the left, lower body on the right, the body in between */}
+      <View style={styles.bodyRow} onLayout={e => setRowW(e.nativeEvent.layout.width)}>
+        {renderSide('Upper body', UPPER)}
+        <View style={{ width: bw, height: bh, borderRadius: 12, overflow: 'hidden' }}>
+          <Image
+            source={view === 'front' ? require('../assets/body_front.jpg') : require('../assets/body_back.jpg')}
+            style={{ width: bw, height: bh, resizeMode: 'cover' }}
+          />
+          {trained.map(([muscle, sets]) => {
+            const src = masks[muscle];
+            if (!src) return null;
+            const shade = shadeFor(sets);
+            return (
+              <Image key={`${view}-${muscle}`} source={src} fadeDuration={0}
+                style={[StyleSheet.absoluteFill, { width: bw, height: bh, resizeMode: 'cover', tintColor: shade.color, opacity: shade.opacity }]} />
+            );
+          })}
+        </View>
+        {renderSide('Lower body', LOWER)}
       </View>
 
       {otherSide.length > 0 && (
@@ -138,23 +176,6 @@ export default function BodyAnatomy({
             {otherSide.join(', ')} {otherSide.length === 1 ? 'is' : 'are'} on the {view === 'front' ? 'back' : 'front'} view. Tap to flip
           </Text>
         </TouchableOpacity>
-      )}
-
-      {/* Trained muscles, tap for details */}
-      {trained.length > 0 && (
-        <View style={styles.chips}>
-          {trained.map(([muscle, sets]) => {
-            const shade = shadeFor(sets);
-            return (
-              <TouchableOpacity key={muscle} style={styles.chip} activeOpacity={0.8}
-                disabled={!onSelectMuscle} onPress={() => onSelectMuscle?.(muscle, sets)}>
-                <View style={[styles.chipDot, { backgroundColor: shade.color }]} />
-                <Text style={styles.chipTxt}>{muscle}</Text>
-                <Text style={styles.chipSets}>{sets} {sets === 1 ? 'set' : 'sets'}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
       )}
 
       <View style={styles.legendWrap}>
@@ -174,20 +195,23 @@ export default function BodyAnatomy({
 
 function makeStyles(C: any, isDark: boolean) {
   return StyleSheet.create({
-    container:   { alignItems: 'center', paddingVertical: 10 },
-    toggleRow:   { flexDirection: 'row', backgroundColor: isDark ? C.card : '#E8EBF3', borderRadius: 14, padding: 4, marginBottom: 14, gap: 4, borderWidth: 1, borderColor: C.border },
+    container:   { alignItems: 'center', paddingTop: 2, paddingBottom: 4 },
+    toggleRow:   { flexDirection: 'row', backgroundColor: isDark ? C.card : '#E8EBF3', borderRadius: 14, padding: 4, marginBottom: 10, gap: 4, borderWidth: 1, borderColor: C.border },
+    bodyRow:     { flexDirection: 'row', alignSelf: 'stretch', justifyContent: 'space-between', alignItems: 'flex-start' },
+    side:        { width: SIDE_W, paddingTop: 6, gap: 6 },
+    sideTitle:   { fontSize: 9, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 },
+    sideNone:    { fontSize: 11, fontWeight: '600', color: C.muted },
+    sideItem:    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 7, paddingVertical: 6, borderRadius: 10, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
     btn:         { paddingVertical: 7, paddingHorizontal: 28, borderRadius: 10 },
     btnA:        { backgroundColor: C.accent, shadowColor: C.accent, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 3 },
     btnTxt:      { fontSize: 13, fontWeight: '700', color: C.muted },
     btnTxtA:     { color: '#FFFFFF' },
     otherSide:   { fontSize: 12, fontWeight: '600', color: C.accent, marginTop: 10, textAlign: 'center' },
-    chips:       { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6, marginTop: 12 },
-    chip:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },
-    chipDot:     { width: 10, height: 10, borderRadius: 5 },
-    chipTxt:     { fontSize: 12, fontWeight: '700', color: C.text },
-    chipSets:    { fontSize: 11, fontWeight: '600', color: C.muted },
-    legendWrap:  { width: '100%', marginTop: 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border, alignItems: 'center' },
-    legendTitle: { fontSize: 11, fontWeight: '700', color: C.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 },
+    chipDot:     { width: 9, height: 9, borderRadius: 5 },
+    chipTxt:     { fontSize: 11, fontWeight: '700', color: C.text },
+    chipSets:    { fontSize: 10, fontWeight: '600', color: C.muted },
+    legendWrap:  { width: '100%', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: C.border, alignItems: 'center' },
+    legendTitle: { fontSize: 10, fontWeight: '700', color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 },
     scaleRow:    { flexDirection: 'row', gap: 4 },
     scaleCell:   { alignItems: 'center', gap: 4 },
     scaleBox:    { width: 30, height: 10, borderRadius: 3 },

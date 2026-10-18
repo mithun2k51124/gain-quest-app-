@@ -1302,9 +1302,7 @@ export default function WorkoutsScreen() {
                       {activeDate && (
                         <WorkoutCalendar selected={activeDate} workoutDates={sortedDates} color={C.red} onSelect={setHistDate} />
                       )}
-                      <Text style={{ fontSize: 12, color: C.muted, marginTop: 12, marginBottom: 4 }}>
-                        Each muscle you trained turns red. More sets, deeper red (1 set light red, 5+ sets darkest).
-                      </Text>
+                      <View style={{ height: 12 }} />
                       <BodyAnatomy muscleSetCounts={setCountsMap} />
                     </View>
                   </Card>
@@ -1327,18 +1325,17 @@ export default function WorkoutsScreen() {
                           {byEx.length > 0 ? (
                             <>
                               <View style={styles.histStats}>
-                                <View style={styles.histStat}>
-                                  <Text style={styles.histStatNum}>{byEx.length}</Text>
-                                  <Text style={styles.histStatLbl}>exercises</Text>
-                                </View>
-                                <View style={styles.histStat}>
-                                  <Text style={styles.histStatNum}>{totalSets}</Text>
-                                  <Text style={styles.histStatLbl}>sets</Text>
-                                </View>
-                                <View style={styles.histStat}>
-                                  <Text style={styles.histStatNum}>{volume >= 1000 ? `${+(volume / 1000).toFixed(1)}t` : `${Math.round(volume)}`}</Text>
-                                  <Text style={styles.histStatLbl}>{volume >= 1000 ? 'lifted' : 'kg lifted'}</Text>
-                                </View>
+                                {/* Three equal boxes; big numbers shrink to fit rather than widen a box */}
+                                {[
+                                  { num: String(byEx.length), lbl: 'exercises' },
+                                  { num: String(totalSets), lbl: 'sets' },
+                                  { num: Math.round(volume).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','), lbl: 'kg lifted' },
+                                ].map(s => (
+                                  <View key={s.lbl} style={styles.histStat}>
+                                    <Text style={styles.histStatNum} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>{s.num}</Text>
+                                    <Text style={styles.histStatLbl} numberOfLines={1}>{s.lbl}</Text>
+                                  </View>
+                                ))}
                               </View>
                               {byEx.map(e => {
                                 const mc = C.mg[e.muscle] || C.accent;
@@ -1984,7 +1981,7 @@ function makeStyles(C: any) { return StyleSheet.create({
   histKicker: { fontSize: 11, fontWeight: '800', color: C.accent, letterSpacing: 1 },
   histTitle: { fontSize: 18, fontWeight: '800', color: C.text, marginTop: 2 },
   histStats: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 6 },
-  histStat: { flex: 1, alignItems: 'center', paddingVertical: 10, backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+  histStat: { flex: 1, flexBasis: 0, minWidth: 0, alignItems: 'center', paddingVertical: 10, paddingHorizontal: 6, backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border },
   histStatNum: { fontSize: 18, fontWeight: '800', color: C.text },
   histStatLbl: { fontSize: 10, fontWeight: '700', color: C.muted, marginTop: 2, textTransform: 'uppercase' },
   histEx: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
