@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Modal,
   LayoutChangeEvent,
+  Image,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,7 +42,7 @@ import {
 } from '../db/database';
 import { Card, Btn, MuscleTag, SectionHeader, EmptyState } from '../components/ui';
 import BodyAnatomy from '../components/BodyAnatomy';
-import { ExerciseGuideButton } from '../components/ExerciseGuide';
+import { ExerciseGuideButton, ExerciseGuideModal } from '../components/ExerciseGuide';
 import { findExercise } from '../constants/exerciseCatalog';
 import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
 import { WheelPicker } from '../components/WheelPicker';
@@ -678,6 +679,8 @@ function ExerciseLogCard({
 
   // Start exercise opens the full-screen set page; it logs each set as it's finished
   const [sessionOpen, setSessionOpen] = useState(false);
+  const [photo] = useState(() => findExercise(name)?.images[0]);
+  const [guideOpen, setGuideOpen] = useState(false);
   const logFromSession = (r: number, w: number) => {
     onLog(1, r, w);
     setExtraSet(false);
@@ -705,12 +708,20 @@ function ExerciseLogCard({
       <View style={styles.section}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <Text style={[styles.sectionTitle, { flex: 1 }]}>{ex.exercise_name}</Text>
+          {/* Photo of the exercise; tap for the full guide */}
+          {photo && (
+            <TouchableOpacity onPress={() => setGuideOpen(true)} activeOpacity={0.8}
+              style={[styles.exThumbWrap, { borderColor: muscleColor + '55' }]} accessibilityLabel="Exercise guide">
+              <Image source={photo} style={styles.exThumb} resizeMode="cover" />
+            </TouchableOpacity>
+          )}
           {onDelete && (
             <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={20} color={C.red} />
             </TouchableOpacity>
           )}
         </View>
+        {guideOpen && <ExerciseGuideModal name={name} color={muscleColor} onClose={() => setGuideOpen(false)} />}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <Text style={{ fontSize: 13, color: C.mg[ex.muscle_group], fontWeight: '700' }}>
             {ex.muscle_group.toUpperCase()}
@@ -2012,6 +2023,8 @@ function makeStyles(C: any) { return StyleSheet.create({
     color: C.accent,
   },
   // PR overlay
+  exThumbWrap: { width: 52, height: 40, borderRadius: 10, overflow: 'hidden', borderWidth: 1, marginRight: 8, backgroundColor: C.bg },
+  exThumb: { width: '100%', height: '100%' },
   startExBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 14 },
   startExTxt: { fontSize: 15, fontWeight: '900', color: '#fff' },
   // History: the selected day's workout
