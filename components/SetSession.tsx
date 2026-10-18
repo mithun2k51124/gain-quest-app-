@@ -3,14 +3,19 @@
 // Done logs one set, asks how it went (thumbs up / down) and suggests the next set's weight
 // (or reps for bodyweight moves), one step heavier or lighter.
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ImageSourcePropType, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../contexts/ThemeContext';
 import { stepsAway } from '../constants/startingLoads';
+import { getSetting, setSetting } from '../db/database';
+import { LoopingThumb } from './ExerciseGuide';
 
 type Phase = 'set' | 'rate' | 'next';
+
+const PREVIEW_KEY = 'set_preview_always';
+const AUTO_BACK_S = 5;
 
 const mmss = (ms: number) => {
   const s = Math.floor(ms / 1000);
@@ -18,10 +23,11 @@ const mmss = (ms: number) => {
 };
 
 export function SetSession({
-  visible, name, color, doneSets, goalSets, reps: reps0, kg: kg0, repsOnly, steps, onLog, onChange, onClose,
+  visible, name, color, doneSets, goalSets, reps: reps0, kg: kg0, repsOnly, steps, images, onLog, onChange, onClose,
 }: {
   visible: boolean;
   name: string;
+  images?: ImageSourcePropType[];   // the exercise's start/end photos, for the preview
   color: string;
   doneSets: number;           // sets logged so far today
   goalSets?: number;
@@ -61,6 +67,41 @@ export function SetSession({
       return () => { if (tick.current) clearInterval(tick.current); };
     }
   }, [visible, phase, paused]);
+
+  // Preview: the exercise playing big with a small clock. "Always" is remembered across sets
+  const { width: SW } = useWindowDimensions();
+  const hasImages = !!images && images.length > 0;
+  const [alwaysPreview, setAlwaysPreview] = useState(() => getSetting(PREVIEW_KEY, '0') === '1');
+  const [preview, setPreview] = useState(alwaysPreview);
+  const [hint, setHint] = useState<string | null>(null);
+  // Each opening re-reads the setting (another exercise's page may have changed it)
+  useEffect(() => {
+    if (!visible) return;
+    const on = getSetting(PREVIEW_KEY, '0') === '1';
+    setAlwaysPreview(on); setPreview(on);
+  }, [visible]);
+  const [boxH, setBoxH] = useState(0);  // room for the preview between the reps row and I'm done
+  const toggleAlways = () => {
+    const on = !alwaysPreview;
+    setAlwaysPreview(on);
+    setSetting(PREVIEW_KEY, on ? '1' : '0');
+    if (on) setPreview(true);
+    setHint(on ? 'Preview will always show when a set starts' : 'Preview off by default');
+    setTimeout(() => setHint(null), 1800);
+  };
+
+  // After a set: rest. If no thumb is tapped, close after AUTO_BACK_S and land on the Log tab
+  const [autoLeft, setAutoLeft] = useState(AUTO_BACK_S);
+  useEffect(() => {
+    if (!visible || phase !== 'rate') return;
+    setAutoLeft(AUTO_BACK_S);
+    const id = setInterval(() => setAutoLeft(s => s - 1), 1000);
+    return () => clearInterval(id);
+  }, [visible, phase]);
+  useEffect(() => {
+    if (phase === 'rate' && autoLeft <= 0) onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLeft, phase]);
 
   const setNo = phase === 'set' ? doneSets + 1 : doneSets;   // after logging, doneSets includes it
   const allDone = goalSets !== undefined && doneSets >= goalSets;
@@ -102,8 +143,19 @@ export function SetSession({
             </Text>
             <Text style={styles.name} numberOfLines={2}>{name}</Text>
           </View>
-          <View style={{ width: 40 }} />
+          {/* Always show the preview when a set starts (remembered) */}
+          {hasImages ? (
+            <TouchableOpacity onPress={toggleAlways} hitSlop={10} accessibilityLabel="Always show preview"
+              style={[styles.close, alwaysPreview && { backgroundColor: color, borderColor: color }]}>
+              <Ionicons name={alwaysPreview ? 'eye' : 'eye-outline'} size={19} color={alwaysPreview ? '#fff' : C.text} />
+            </TouchableOpacity>
+          ) : <View style={{ width: 40 }} />}
         </View>
+        {hint && (
+          <View style={[styles.hint, { borderColor: color + '55' }]}>
+            <Text style={styles.hintTxt}>{hint}</Text>
+          </View>
+        )}
 
         {phase === 'set' ? (
           <>
@@ -137,13 +189,31 @@ export function SetSession({
               </View>
             </View>
 
-            {/* The timer */}
-            <View style={styles.timerWrap}>
-              <View style={[styles.timerRing, { borderColor: color + '55', shadowColor: color }]}>
-                <Text style={styles.timer} adjustsFontSizeToFit numberOfLines={1}>{mmss(elapsed)}</Text>
-                <Text style={styles.timerSub}>{paused !== null ? 'PAUSED' : 'SET TIME'}</Text>
-              </View>
+            {/* The timer, or the exercise playing with a small clock over it */}
+            <View style={styles.timerWrap} onLayout={e => setBoxH(e.nativeEvent.layout.height)}>
+              {preview && hasImages ? (
+                <View style={[styles.previewBox, { borderColor: color + '55' }]}>
+                  <LoopingThumb images={images!} width={SW - 40}
+                    height={Math.round(Math.max(160, Math.min((SW - 40) * 0.9, (boxH || 9999) - 80)))} />
+                  <View style={styles.miniClock}>
+                    <View style={[styles.miniDot, { backgroundColor: paused !== null ? C.orange : C.green }]} />
+                    <Text style={styles.miniClockTxt}>{mmss(elapsed)}</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={[styles.timerRing, { borderColor: color + '55', shadowColor: color }]}>
+                  <Text style={styles.timer} adjustsFontSizeToFit numberOfLines={1}>{mmss(elapsed)}</Text>
+                  <Text style={styles.timerSub}>{paused !== null ? 'PAUSED' : 'SET TIME'}</Text>
+                </View>
+              )}
               <View style={styles.timerCtrls}>
+                {hasImages && (
+                  <TouchableOpacity style={[styles.ctrl, preview && { borderColor: color, backgroundColor: color + '1F' }]}
+                    activeOpacity={0.8} onPress={() => setPreview(p => !p)}>
+                    <Ionicons name={preview ? 'timer-outline' : 'play-circle-outline'} size={16} color={preview ? color : C.text} />
+                    <Text style={[styles.ctrlTxt, preview && { color }]}>{preview ? 'Big clock' : 'Preview'}</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity style={styles.ctrl} activeOpacity={0.8}
                   onPress={() => {
                     if (paused === null) setPaused(Date.now() - start);
@@ -176,8 +246,11 @@ export function SetSession({
 
             {phase === 'rate' ? (
               <View style={styles.center}>
-                <Text style={styles.question}>How was that set?</Text>
-                <Text style={styles.questionSub}>We'll suggest the {repsOnly ? 'reps' : 'weight'} for the next one.</Text>
+                <Ionicons name="cafe-outline" size={30} color={color} />
+                <Text style={[styles.question, { marginTop: 8 }]}>Rest now</Text>
+                <Text style={styles.questionSub}>
+                  How was that set? Tap one for a {repsOnly ? 'reps' : 'weight'} suggestion, or skip it.
+                </Text>
                 <View style={{ flexDirection: 'row', gap: 12, alignSelf: 'stretch', marginTop: 24 }}>
                   <TouchableOpacity style={[styles.thumb, { borderColor: C.green + '66', backgroundColor: C.green + '14' }]}
                     onPress={() => rate(true)} activeOpacity={0.85}>
@@ -196,6 +269,13 @@ export function SetSession({
                     <Text style={styles.thumbSub}>It was a struggle</Text>
                   </TouchableOpacity>
                 </View>
+                {/* No answer: back to the Log tab after a few seconds, ready for the next set */}
+                <View style={[styles.autoTrack, { backgroundColor: color + '22' }]}>
+                  <View style={[styles.autoFill, { backgroundColor: color, width: `${(autoLeft / AUTO_BACK_S) * 100}%` }]} />
+                </View>
+                <TouchableOpacity onPress={onClose} activeOpacity={0.7} style={{ paddingVertical: 10 }}>
+                  <Text style={styles.autoTxt}>Back to the log in {autoLeft}s · <Text style={{ color: C.accent }}>Go now</Text></Text>
+                </TouchableOpacity>
               </View>
             ) : next && (
               <View style={styles.center}>
@@ -258,6 +338,18 @@ function makeStyles(C: any) {
     loadVal:    { fontSize: 24, fontWeight: '900', color: C.text, minWidth: 56, textAlign: 'center' },
     loadUnit:   { fontSize: 13, fontWeight: '700', color: C.muted },
     timerWrap:  { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    previewBox: { borderRadius: 22, overflow: 'hidden', borderWidth: 1.5, backgroundColor: C.card },
+    miniClock:  {
+      position: 'absolute', top: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 6,
+      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: 'rgba(10,12,20,0.72)',
+    },
+    miniDot:    { width: 7, height: 7, borderRadius: 4 },
+    miniClockTxt: { fontSize: 20, fontWeight: '300', color: '#fff', fontVariant: ['tabular-nums'], letterSpacing: 1 },
+    hint:       { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, backgroundColor: C.card, marginBottom: 4 },
+    hintTxt:    { fontSize: 12, fontWeight: '700', color: C.textSub },
+    autoTrack:  { alignSelf: 'stretch', height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 22 },
+    autoFill:   { height: '100%', borderRadius: 2 },
+    autoTxt:    { fontSize: 13, fontWeight: '700', color: C.muted },
     timerRing:  {
       width: '92%', aspectRatio: 1, maxWidth: 340, borderRadius: 999, borderWidth: 3, alignItems: 'center', justifyContent: 'center',
       backgroundColor: C.card, shadowOpacity: 0.4, shadowRadius: 24, shadowOffset: { width: 0, height: 0 }, elevation: 8,

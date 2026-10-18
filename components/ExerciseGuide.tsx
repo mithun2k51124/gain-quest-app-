@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Animated, Image, useWindowDimensions,
-  ImageSourcePropType,
+  ImageSourcePropType, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { findExercise, CatalogExercise } from '../constants/exerciseCatalog';
@@ -126,9 +126,11 @@ export function ExerciseGuideModal({ name, color, onClose }: { name: string; col
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} onPress={e => e.stopPropagation()}
-          style={[styles.sheet, { backgroundColor: C.card, borderColor: C.border }]}>
+      {/* The backdrop sits behind the sheet (not around it), so touches on the text reach the
+          ScrollView and the steps scroll anywhere you drag */}
+      <View style={styles.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+        <View style={[styles.sheet, { backgroundColor: C.card, borderColor: C.border }]}>
           <View style={[styles.handle, { backgroundColor: C.border }]} />
           <View style={styles.head}>
             <Text style={[styles.title, { color: C.text }]} numberOfLines={2}>{name}</Text>
@@ -172,8 +174,8 @@ export function ExerciseGuideModal({ name, color, onClose }: { name: string; col
             )}
             <Text style={[styles.credit, { color: C.muted }]}>Images: free-exercise-db (public domain)</Text>
           </ScrollView>
-        </TouchableOpacity>
-      </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }

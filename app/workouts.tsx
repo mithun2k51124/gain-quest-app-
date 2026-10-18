@@ -859,6 +859,7 @@ function ExerciseLogCard({
         kg={kg}
         repsOnly={repsOnly}
         steps={steps}
+        images={photos}
         onLog={logFromSession}
         onChange={(r, w) => { setReps(r); if (!repsOnly) setKg(w); }}
         onClose={() => setSessionOpen(false)}
