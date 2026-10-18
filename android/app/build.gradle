@@ -69,6 +69,12 @@ react {
 def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
 
 /**
+ * Release signing is set up when the GAINQUEST_RELEASE_* properties are in ~/.gradle/gradle.properties.
+ */
+def hasReleaseSigning = ['GAINQUEST_RELEASE_STORE_FILE', 'GAINQUEST_RELEASE_KEY_ALIAS',
+    'GAINQUEST_RELEASE_STORE_PASSWORD', 'GAINQUEST_RELEASE_KEY_PASSWORD'].every { project.hasProperty(it) }
+
+/**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
  * For example, to use the international variant, you can use:
@@ -104,14 +110,13 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            if (project.hasProperty('GAINQUEST_RELEASE_STORE_FILE')) {
+        // Values come from ~/.gradle/gradle.properties so the passwords stay out of git
+        if (hasReleaseSigning) {
+            release {
                 storeFile file(GAINQUEST_RELEASE_STORE_FILE)
                 storePassword GAINQUEST_RELEASE_STORE_PASSWORD
                 keyAlias GAINQUEST_RELEASE_KEY_ALIAS
                 keyPassword GAINQUEST_RELEASE_KEY_PASSWORD
-            } else {
-                signingConfig signingConfigs.debug
             }
         }
     }
@@ -120,7 +125,13 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.release
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.warn("WARNING: GAINQUEST_RELEASE_* signing properties not found in ~/.gradle/gradle.properties. " +
+                    "This release build is signed with the DEBUG key and can't be uploaded to Google Play.")
+                signingConfig signingConfigs.debug
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

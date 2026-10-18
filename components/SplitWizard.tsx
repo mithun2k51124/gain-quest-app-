@@ -3,7 +3,7 @@
 // strength check and which technique lifts they've done. Plans run in blocks of a few weeks; when a
 // block ends, a short re-test builds the next block with fresh exercises.
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -27,7 +27,16 @@ export interface SplitConfig extends SplitAnswers {
   prescription: string;
   blockStart?: string;              // local YYYY-MM-DD the current block started
   rotateWeeks?: number;             // new exercises every N weeks
-  doses?: Record<string, string>;   // exercise → '3 × 8–12', shown in the planner
+  doses?: Record<string, string>;   // doseKey(day, exercise) → '3 × 8–12', shown in the planner
+}
+
+// The same exercise can get a different dose on different days, so doses are stored per day
+const doseKey = (day: string, exercise: string) => `${day}|${exercise}`;
+
+/** Sets × reps the split builder picked for an exercise on a planner day ('Monday'). */
+export function doseFor(cfg: SplitConfig | null, day: string, exercise: string): string | undefined {
+  // Splits saved before doses were stored per day used the bare exercise name
+  return cfg?.doses?.[doseKey(day, exercise)] ?? cfg?.doses?.[exercise];
 }
 
 type StepKey = 'level' | 'place' | 'strength' | 'skills' | 'minutes' | 'days' | 'rest' | 'plan';
@@ -125,6 +134,10 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
       setLevel(cfg.level); setMinutes(cfg.minutes); setDays(cfg.daysPerWeek); setRestDays(cfg.restDays);
       setRotateWeeks(cfg.rotateWeeks ?? DEFAULT_ROTATE_WEEKS);
       setSkills(cfg.skills ?? []);
+    } else {
+      // First-time setup: don't carry over answers from a wizard that was closed halfway
+      setSkills([]);
+      setRotateWeeks(DEFAULT_ROTATE_WEEKS);
     }
     const eq = cfg?.equipment ?? { place: 'gym' as Place, items: [...GYM_ITEMS] };
     setEquipment(eq);
@@ -189,11 +202,12 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
         const drop = new Set<EquipmentId>([id, ...(DEPENDENTS[id] ?? [])]);
         return { ...e, items: e.items.filter(x => !drop.has(x)) };
       }
-      // Home weights start from a typical answer; gyms have the full range
+      // Home weights start from a typical answer; gyms have the full range (so more than one kettlebell)
       const home = e.place === 'home';
+      const added: EquipmentId[] = e.place === 'gym' && id === 'kettlebell' ? [id, 'kettlebell_pair'] : [id];
       return {
         ...e,
-        items: [...e.items, id],
+        items: [...e.items, ...added.filter(x => !e.items.includes(x))],
         dumbbellMaxKg: home && id === 'dumbbells' ? e.dumbbellMaxKg ?? 10 : e.dumbbellMaxKg,
         kettlebellMaxKg: home && id === 'kettlebell' ? e.kettlebellMaxKg ?? 12 : e.kettlebellMaxKg,
         plateTotalKg: home && id === 'barbell' ? e.plateTotalKg ?? 50 : e.plateTotalKg,
@@ -229,7 +243,7 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
         exercises: picks.map(e => ({ name: e.name, muscle: e.muscle })),
       })));
       const doses: Record<string, string> = {};
-      for (const { picks } of finalDays) for (const e of picks) doses[e.name] = `${e.sets} × ${e.reps}`;
+      for (const { day, picks } of finalDays) for (const e of picks) doses[doseKey(day.dayName, e.name)] = `${e.sets} × ${e.reps}`;
       const cfg: SplitConfig = {
         level, minutes, daysPerWeek: days, restDays, equipment, strength, skills, block,
         rotateWeeks, blockStart: todayStr(), name: plan.name, prescription: plan.prescription, doses,
@@ -574,6 +588,13 @@ export function SplitCard({ config, plans, onOpen, onNewBlock }: {
 }) {
   const { C } = useTheme();
   const styles = makeStyles(C);
+  // Re-render when the app comes back to the foreground, so the block week, the
+  // "Time for new exercises" banner and today's highlight stay current across days
+  const [, setResumedAt] = useState(0);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') setResumedAt(Date.now()); });
+    return () => sub.remove();
+  }, []);
   const todayIdx = new Date().getDay();
 
   if (!config) {

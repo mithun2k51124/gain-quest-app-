@@ -40,7 +40,7 @@ import { Card, Btn, MuscleTag, SectionHeader, EmptyState } from '../components/u
 import BodyAnatomy from '../components/BodyAnatomy';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 import { findExercise } from '../constants/exerciseCatalog';
-import { SplitWizard, SplitCard, getSplitConfig } from '../components/SplitWizard';
+import { SplitWizard, SplitCard, getSplitConfig, doseFor } from '../components/SplitWizard';
 import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -1261,8 +1261,6 @@ function PlannerTab({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'setup' | 'next'>('setup');
   const [splitConfig, setSplitConfig] = useState(() => getSplitConfig());
-  // Sets × reps the split builder picked for each exercise
-  const doses = splitConfig?.doses ?? {};
 
   const getEdit = (day: string) =>
     edits[day] || {
@@ -1375,17 +1373,21 @@ function PlannerTab({
                 ).map(([mg, exList]) => (
                   <View key={mg}>
                     <Text style={[styles.plannedMuscleHeader, { color: C.mg[mg] || C.accent }]}>{mg}</Text>
-                    {exList.map(ex => (
-                      <View key={ex.id} style={styles.plannedExerciseRow}>
-                        <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
-                        <Text style={[styles.exName, { flex: 1 }]}>{ex.exercise_name}</Text>
-                        {doses[ex.exercise_name] ? <Text style={ps.dose}>{doses[ex.exercise_name]}</Text> : null}
-                        <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} />
-                        <TouchableOpacity onPress={() => onDeleteExercise(ex.id)} style={[styles.deletePlanExBtn, { marginLeft: 10 }]}>
-                          <Text style={styles.deletePlanExText}>×</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
+                    {exList.map(ex => {
+                      // Sets × reps the split builder picked for this exercise on this day
+                      const dose = doseFor(splitConfig, day, ex.exercise_name);
+                      return (
+                        <View key={ex.id} style={styles.plannedExerciseRow}>
+                          <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
+                          <Text style={[styles.exName, { flex: 1 }]}>{ex.exercise_name}</Text>
+                          {dose ? <Text style={ps.dose}>{dose}</Text> : null}
+                          <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} />
+                          <TouchableOpacity onPress={() => onDeleteExercise(ex.id)} style={[styles.deletePlanExBtn, { marginLeft: 10 }]}>
+                            <Text style={styles.deletePlanExText}>×</Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
                   </View>
                 ))}
               </View>
