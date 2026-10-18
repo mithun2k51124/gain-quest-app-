@@ -13,12 +13,7 @@ import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Modal } from 'react-native';
-import DraggableFlatList, {
-  ScaleDecorator,
-  ShadowDecorator,
-  OpacityDecorator,
-  RenderItemParams,
-} from 'react-native-draggable-flatlist';
+import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import {
   getTodayLog,
   getGoals,
@@ -40,6 +35,7 @@ import {
 } from '../db/database';
 import { Card, Btn, ProgressBar, Ring, PickerModal, SectionHeader } from '../components/ui';
 import { SettingsButton } from '../components/SettingsButton';
+import { DragWidget, DRAG_LIST_PROPS } from '../components/DragWidget';
 import { useTheme } from '../contexts/ThemeContext';
 import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -519,40 +515,15 @@ export default function TrackerScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   // Render Draggable Item
   // ─────────────────────────────────────────────────────────────────────────
-  const renderItem = ({ item, drag, isActive }: RenderItemParams<TrackerSectionKey>) => {
-    return (
-      <ScaleDecorator activeScale={1.03}>
-        <OpacityDecorator activeOpacity={1}>
-          <TouchableOpacity
-            activeOpacity={1}
-            onLongPress={() => {
-              try { Vibration.vibrate([0, 18, 40, 12]); } catch {}
-              drag();
-            }}
-            delayLongPress={160}
-            disabled={isActive}
-            style={[
-              styles.dragItemContainer,
-              isActive && styles.activeDragItem,
-            ]}
-          >
-            <View style={isActive ? styles.activeInnerContent : undefined}>
-              {isActive && (
-                <View style={styles.frostOverlay} pointerEvents="none">
-                  <View style={styles.frostInner} />
-                </View>
-              )}
-              {item === 'water' && renderWaterSection(isActive)}
-              {item === 'nutrition' && renderNutritionSection(isActive)}
-              {item === 'scanner' && renderScannerSection(isActive)}
-              {item === 'creatine' && renderCreatineSection(isActive)}
-              {item === 'habits' && renderHabitsSection(isActive)}
-            </View>
-          </TouchableOpacity>
-        </OpacityDecorator>
-      </ScaleDecorator>
-    );
-  };
+  const renderItem = ({ item, drag, isActive }: RenderItemParams<TrackerSectionKey>) => (
+    <DragWidget drag={drag} isActive={isActive}>
+      {item === 'water' && renderWaterSection(isActive)}
+      {item === 'nutrition' && renderNutritionSection(isActive)}
+      {item === 'scanner' && renderScannerSection(isActive)}
+      {item === 'creatine' && renderCreatineSection(isActive)}
+      {item === 'habits' && renderHabitsSection(isActive)}
+    </DragWidget>
+  );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -569,18 +540,7 @@ export default function TrackerScreen() {
           </Text>
         </View>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {/* Edit / Configure Button */}
-          <TouchableOpacity
-            style={styles.editHeaderBtn}
-            onPress={() => setEditModal(true)}
-            activeOpacity={0.75}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="create-outline" size={18} color={C.accent} />
-          </TouchableOpacity>
-          <SettingsButton />
-        </View>
+        <SettingsButton />
       </View>
 
       {/* ── Interactive Draggable FlatList ── */}
@@ -591,18 +551,16 @@ export default function TrackerScreen() {
         onDragEnd={handleDragEnd}
         keyExtractor={(item) => item}
         renderItem={renderItem}
-        activationDistance={8}
-        autoscrollThreshold={40}
-        autoscrollSpeed={35}
-        animationConfig={{
-          damping: 40,
-          mass: 0.08,
-          stiffness: 700,
-          overshootClamping: true,
-        }}
+        {...DRAG_LIST_PROPS}
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        ListFooterComponent={
+          <TouchableOpacity style={[styles.customizeBtn, { borderColor: C.border }]} onPress={() => setEditModal(true)} activeOpacity={0.75}>
+            <Ionicons name="apps-outline" size={16} color={C.accent} />
+            <Text style={[styles.customizeTxt, { color: C.accent }]}>Customize sections</Text>
+          </TouchableOpacity>
+        }
       />
 
       <PickerModal
@@ -769,6 +727,11 @@ function makeStyles(C: any, isDark?: boolean) {
       borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
     },
     scroll: { padding: 16, paddingBottom: 120 },
+    customizeBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+      paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', marginTop: 4,
+    },
+    customizeTxt: { fontSize: 13, fontWeight: '800' },
 
     // Drag item wrapper & active state
     dragItemContainer: {

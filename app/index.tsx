@@ -10,16 +10,13 @@ import {
   Modal,
   Vibration,
   Animated,
+  Image,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, G } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
-import DraggableFlatList, {
-  ScaleDecorator,
-  OpacityDecorator,
-  RenderItemParams,
-} from 'react-native-draggable-flatlist';
+import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import {
   getTodayLog,
   getGoals,
@@ -44,9 +41,12 @@ import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { RemindersWidget, RemindersSheet } from '../components/Reminders';
 import { ExerciseLibrary } from '../components/ExerciseLibrary';
+import { ExerciseGuideModal } from '../components/ExerciseGuide';
+import { DragWidget, DRAG_LIST_PROPS } from '../components/DragWidget';
+import { EXERCISE_CATALOG, findExercise } from '../constants/exerciseCatalog';
 import { turnOnReminders, notificationsAvailable, remindersEnabled, REMINDERS_UNAVAILABLE_MSG } from '../utils/reminders';
 
-export type HomeSectionKey = 'workout' | 'overview' | 'intake' | 'week_habits' | 'reminders';
+export type HomeSectionKey = 'workout' | 'overview' | 'intake' | 'week_habits' | 'reminders' | 'library';
 
 const DEFAULT_SECTIONS: HomeSectionKey[] = [
   'workout',
@@ -54,7 +54,20 @@ const DEFAULT_SECTIONS: HomeSectionKey[] = [
   'intake',
   'week_habits',
   'reminders',
+  'library',
 ];
+
+// Exercise Library widget: three picks a day from these, so the preview changes daily
+const FEATURED = [
+  'Barbell Bench Press - Medium Grip', 'Barbell Full Squat', 'Pullups', 'Dumbbell Shoulder Press',
+  'Romanian Deadlift', 'Plank', 'Incline Dumbbell Press', 'Bent Over Barbell Row', 'Hammer Curls',
+  'Triceps Pushdown', 'Goblet Squat', 'Dumbbell Lunges', 'Face Pull', 'Hanging Leg Raise',
+  'Seated Cable Rows', 'Side Lateral Raise', 'Barbell Hip Thrust', 'Wide-Grip Lat Pulldown',
+].map(n => findExercise(n)).filter((e): e is NonNullable<typeof e> => !!e);
+function todaysPicks() {
+  const day = Math.floor(Date.now() / 86400000);
+  return [0, 1, 2].map(i => FEATURED[(day * 3 + i) % FEATURED.length]);
+}
 
 export default function DashboardScreen() {
   const { showAlert } = useCustomAlert();
@@ -88,6 +101,8 @@ export default function DashboardScreen() {
   const remindersOn = useMemo(() => remindersEnabled(), [remindersKey]);
   const [flashReminders, setFlashReminders] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [guideFor, setGuideFor] = useState<string | null>(null);
+  const picks = useMemo(todaysPicks, []);
   const listRef = useRef<any>(null);
 
   // Draggable section order
@@ -204,6 +219,9 @@ export default function DashboardScreen() {
           break;
         case 'reminders':
           setRemindersOpen(true);
+          break;
+        case 'library':
+          setLibraryOpen(true);
           break;
       }
     }, 180);
@@ -552,43 +570,71 @@ export default function DashboardScreen() {
     </View>
   );
 
+  const renderLibrarySection = (isActive: boolean) => (
+    <View style={styles.sectionWrap}>
+      <View style={styles.sectionHeaderRow}>
+        <SectionHeader title="Exercise Library" />
+        <View style={styles.dragGripBox}>
+          <Ionicons name="reorder-two" size={18} color={isActive ? C.accent : C.muted + '77'} />
+        </View>
+      </View>
+      <Card accent={C.accent}>
+        <View style={{ padding: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={[styles.libIcon, { backgroundColor: C.accent + '1F' }]}>
+              <Ionicons name="book-outline" size={20} color={C.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.libTitle, { color: C.text }]}>{EXERCISE_CATALOG.length} exercises with guides</Text>
+              <Text style={[styles.libSub, { color: C.muted }]}>Photos, step-by-step form and the muscles each one works.</Text>
+            </View>
+          </View>
+
+          <Text style={[styles.libKicker, { color: C.muted }]}>TODAY'S PICKS · TAP FOR THE GUIDE</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {picks.map(ex => {
+              const mc = C.mg[ex.group] || C.accent;
+              return (
+                <TouchableOpacity key={ex.name} style={[styles.libPick, { backgroundColor: C.bg, borderColor: C.border }]}
+                  onPress={() => setGuideFor(ex.name)} activeOpacity={0.8}>
+                  {ex.images[0] ? (
+                    <Image source={ex.images[0]} style={styles.libThumb} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.libThumb, { alignItems: 'center', justifyContent: 'center', backgroundColor: mc + '22' }]}>
+                      <Ionicons name="barbell-outline" size={22} color={mc} />
+                    </View>
+                  )}
+                  <View style={{ padding: 7 }}>
+                    <Text style={[styles.libPickName, { color: C.text }]} numberOfLines={2}>{ex.name}</Text>
+                    <Text style={[styles.libPickGroup, { color: mc }]}>{ex.group}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <TouchableOpacity style={[styles.libBtn, { backgroundColor: C.accent }]} onPress={() => setLibraryOpen(true)} activeOpacity={0.85}>
+            <Ionicons name="search" size={15} color="#fff" />
+            <Text style={styles.libBtnTxt}>Browse the library</Text>
+          </TouchableOpacity>
+        </View>
+      </Card>
+    </View>
+  );
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render Draggable Item
   // ─────────────────────────────────────────────────────────────────────────
-  const renderItem = ({ item, drag, isActive }: RenderItemParams<HomeSectionKey>) => {
-    return (
-      <ScaleDecorator activeScale={1.03}>
-        <OpacityDecorator activeOpacity={1}>
-          <TouchableOpacity
-            activeOpacity={1}
-            onLongPress={() => {
-              try { Vibration.vibrate([0, 18, 40, 12]); } catch {}
-              drag();
-            }}
-            delayLongPress={160}
-            disabled={isActive}
-            style={[
-              styles.dragItemContainer,
-              isActive && styles.activeDragItem,
-            ]}
-          >
-            <View style={isActive ? styles.activeInnerContent : undefined}>
-              {isActive && (
-                <View style={styles.frostOverlay} pointerEvents="none">
-                  <View style={styles.frostInner} />
-                </View>
-              )}
-              {item === 'workout' && renderWorkoutSection(isActive)}
-              {item === 'overview' && renderOverviewSection(isActive)}
-              {item === 'intake' && renderIntakeSection(isActive)}
-              {item === 'week_habits' && renderWeekHabitsSection(isActive)}
-              {item === 'reminders' && renderRemindersSection(isActive)}
-            </View>
-          </TouchableOpacity>
-        </OpacityDecorator>
-      </ScaleDecorator>
-    );
-  };
+  const renderItem = ({ item, drag, isActive }: RenderItemParams<HomeSectionKey>) => (
+    <DragWidget drag={drag} isActive={isActive}>
+      {item === 'workout' && renderWorkoutSection(isActive)}
+      {item === 'overview' && renderOverviewSection(isActive)}
+      {item === 'intake' && renderIntakeSection(isActive)}
+      {item === 'week_habits' && renderWeekHabitsSection(isActive)}
+      {item === 'reminders' && renderRemindersSection(isActive)}
+      {item === 'library' && renderLibrarySection(isActive)}
+    </DragWidget>
+  );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -606,17 +652,6 @@ export default function DashboardScreen() {
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {/* Exercise library */}
-          <TouchableOpacity
-            style={styles.editHeaderBtn}
-            onPress={() => setLibraryOpen(true)}
-            activeOpacity={0.75}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityLabel="Exercise library"
-          >
-            <Ionicons name="barbell-outline" size={18} color={C.accent} />
-          </TouchableOpacity>
-
           {/* Reminders bell — full colour when notifications are on, toned down when off */}
           <TouchableOpacity
             style={[styles.editHeaderBtn, !remindersOn && { opacity: 0.45 }]}
@@ -628,14 +663,15 @@ export default function DashboardScreen() {
               color={remindersOn ? C.accent : C.muted} />
           </TouchableOpacity>
 
-          {/* Edit / Configure Button */}
+          {/* Analytics (no longer a tab) */}
           <TouchableOpacity
             style={styles.editHeaderBtn}
-            onPress={() => setEditModal(true)}
+            onPress={() => router.navigate({ pathname: '/analytics', params: { from: '/' } } as any)}
             activeOpacity={0.75}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Analytics"
           >
-            <Ionicons name="create-outline" size={18} color={C.accent} />
+            <Ionicons name="stats-chart-outline" size={18} color={C.accent} />
           </TouchableOpacity>
 
           <SettingsButton />
@@ -655,19 +691,18 @@ export default function DashboardScreen() {
         onDragEnd={handleDragEnd}
         keyExtractor={(item) => item}
         renderItem={renderItem}
-        activationDistance={8}
-        autoscrollThreshold={40}
-        autoscrollSpeed={35}
-        animationConfig={{
-          damping: 40,
-          mass: 0.08,
-          stiffness: 700,
-          overshootClamping: true,
-        }}
+        {...DRAG_LIST_PROPS}
         refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        ListFooterComponent={
+          <TouchableOpacity style={[styles.customizeBtn, { borderColor: C.border }]} onPress={() => setEditModal(true)} activeOpacity={0.75}>
+            <Ionicons name="apps-outline" size={16} color={C.accent} />
+            <Text style={[styles.customizeTxt, { color: C.accent }]}>Customize widgets</Text>
+          </TouchableOpacity>
+        }
       />
+      {guideFor && <ExerciseGuideModal name={guideFor} color={C.accent} onClose={() => setGuideFor(null)} />}
 
       {/* ── Body Weight Popup ── */}
       <Modal visible={weightPopup} transparent animationType="fade" onRequestClose={() => setWeightPopup(false)}>
@@ -741,6 +776,7 @@ export default function DashboardScreen() {
                   intake: 'Intake Goals',
                   week_habits: 'This Week & Habits',
                   reminders: 'Reminders',
+                  library: 'Exercise Library',
                 };
                 const icons: Record<string, any> = {
                   workout: 'barbell-outline',
@@ -748,6 +784,7 @@ export default function DashboardScreen() {
                   intake: 'nutrition-outline',
                   week_habits: 'calendar-outline',
                   reminders: 'notifications-outline',
+                  library: 'book-outline',
                 };
                 return (
                   <View key={key} style={[styles.glassWidgetRow, { borderColor: C.border }]}>
@@ -1069,6 +1106,22 @@ function makeStyles(C: any, isDark?: boolean) {
       borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
     },
     scroll: { padding: 16, paddingBottom: 120 },
+    customizeBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+      paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', marginTop: 4,
+    },
+    customizeTxt: { fontSize: 13, fontWeight: '800' },
+    // Exercise Library widget
+    libIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    libTitle: { fontSize: 15, fontWeight: '800' },
+    libSub: { fontSize: 12, marginTop: 2, lineHeight: 16 },
+    libKicker: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6, marginTop: 14, marginBottom: 8 },
+    libPick: { flex: 1, borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+    libThumb: { width: '100%', height: 64 },
+    libPickName: { fontSize: 11, fontWeight: '700', lineHeight: 14 },
+    libPickGroup: { fontSize: 10, fontWeight: '800', marginTop: 3 },
+    libBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 11, borderRadius: 12 },
+    libBtnTxt: { fontSize: 14, fontWeight: '800', color: '#fff' },
 
     // Drag item wrapper & active state
     dragItemContainer: {

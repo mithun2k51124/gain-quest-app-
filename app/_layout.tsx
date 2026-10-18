@@ -13,35 +13,34 @@ import { AlertProvider } from '../contexts/AlertContext';
 import OnboardingModal from '../components/OnboardingModal';
 import AIWorkoutLogger from '../components/AIWorkoutLogger';
 import { initReminders, onReminderTap } from '../utils/reminders';
+import { isSwipeLocked } from '../utils/swipeLock';
 
+// Swipe order = tab bar order
 const TAB_ROUTES = [
   '/',
-  '/tracker',
-  '/overall',
   '/workouts',
+  '/tracker',
   '/prs',
-  '/analytics',
+  '/overall',
 ];
 
 
 const getTabIndex = (path: string): number => {
   if (!path || path === '/' || path === '') return 0;
-  if (path.startsWith('/tracker')) return 1;
-  if (path.startsWith('/overall')) return 2;
-  if (path.startsWith('/workouts')) return 3;
-  if (path.startsWith('/prs')) return 4;
-  if (path.startsWith('/analytics')) return 5;
-  return -1;  // Settings isn't a tab: no swiping from it
+  if (path.startsWith('/workouts')) return 1;
+  if (path.startsWith('/tracker')) return 2;
+  if (path.startsWith('/prs')) return 3;
+  if (path.startsWith('/overall')) return 4;
+  return -1;  // Settings and Analytics aren't tabs: no swiping from them
 };
 
 // Tab definitions — single source of truth
 const TAB_DEFS = [
   { name: 'index',     label: 'Home',      icon: 'grid-outline' as const },
-  { name: 'tracker',   label: 'Tracker',   icon: 'clipboard-outline' as const },
-  { name: 'overall',   label: 'Overall',   icon: 'speedometer-outline' as const },
   { name: 'workouts',  label: 'Workouts',  icon: 'barbell-outline' as const },
+  { name: 'tracker',   label: 'Tracker',   icon: 'clipboard-outline' as const },
   { name: 'prs',       label: 'PRs',       icon: 'trophy-outline' as const },
-  { name: 'analytics', label: 'Analytics', icon: 'stats-chart-outline' as const },
+  { name: 'overall',   label: 'Overall',   icon: 'speedometer-outline' as const },
 ];
 
 // Custom tab button: full-width colored indicator line + spring press animation
@@ -168,8 +167,11 @@ function RootLayoutInner() {
   const panGesture = useMemo(() => {
     return Gesture.Pan()
       .runOnJS(true)
+      // Never a page swipe while a widget is being dragged (utils/swipeLock)
+      .onTouchesMove((_e, manager) => { if (isSwipeLocked()) manager.fail(); })
       .activeOffsetX([-15, 15])
-      .failOffsetY([-35, 35])
+      // Mostly-vertical moves (scrolling, dragging widgets) are never a page swipe
+      .failOffsetY([-24, 24])
       .onEnd((e) => {
         const isQuickFling = Math.abs(e.velocityX) > 200 && Math.abs(e.translationX) > 16;
         const isLongSwipe = Math.abs(e.translationX) > 40;
@@ -293,6 +295,8 @@ function RootLayoutInner() {
         ))}
         {/* Settings opens from the gear in each screen's header, not from the tab bar */}
         <Tabs.Screen name="settings" options={{ href: null, title: 'Settings' }} />
+        {/* Analytics opens from the chart button in the Home header */}
+        <Tabs.Screen name="analytics" options={{ href: null, title: 'Analytics' }} />
       </Tabs>
         </View>
       </GestureDetector>
