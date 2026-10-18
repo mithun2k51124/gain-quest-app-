@@ -48,13 +48,14 @@ import { turnOnReminders, notificationsAvailable, remindersEnabled, REMINDERS_UN
 
 export type HomeSectionKey = 'workout' | 'overview' | 'intake' | 'week_habits' | 'reminders' | 'library';
 
+// Order on a fresh install (and after Reset); a saved order wins
 const DEFAULT_SECTIONS: HomeSectionKey[] = [
   'workout',
   'overview',
-  'intake',
-  'week_habits',
-  'reminders',
   'library',
+  'week_habits',
+  'intake',
+  'reminders',
 ];
 
 // Exercise Library widget: three picks a day from these, so the preview changes daily
@@ -256,12 +257,6 @@ export default function DashboardScreen() {
       info: 'Auto-tracked when you log a workout session in the Workouts tab.',
     },
     {
-      icon: 'flash-outline',
-      label: 'Creatine',
-      done: !!log.creatine_taken,
-      info: 'Logged from the Tracker tab when you mark creatine as taken.',
-    },
-    {
       icon: 'water-outline',
       label: 'Water',
       done: !!log.water_goal_reached,
@@ -272,12 +267,6 @@ export default function DashboardScreen() {
       label: 'Protein',
       done: !!log.protein_goal_reached,
       info: 'Auto-marks when your protein intake reaches your daily goal.',
-    },
-    {
-      icon: 'moon-outline',
-      label: 'Sleep',
-      done: !!log.slept_well,
-      info: 'Logged from the Tracker tab when you mark sleep as good.',
     },
   ];
   const habitsDone = habits.filter(h => h.done).length;
@@ -433,36 +422,66 @@ export default function DashboardScreen() {
           <Ionicons name="reorder-two" size={18} color={isActive ? C.water : C.muted + '77'} />
         </View>
       </View>
-      <Card style={isActive ? styles.activeCardGlow : undefined}>
-        <View style={styles.intakeContainer}>
-          <MacroProgress
-            icon="water-outline"
-            name="Water"
-            val={`${log.water_intake.toFixed(2)} / ${goals.water_goal} L`}
-            pct={waterPct}
-            color={C.water}
-            onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'water' } } as any)}
-          />
-          <View style={styles.divider} />
-          <MacroProgress
-            icon="restaurant-outline"
-            name="Protein"
-            val={`${Math.round(log.protein_intake)} / ${goals.protein_goal} g`}
-            pct={proteinPct}
-            color={C.protein}
-            onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'nutrition' } } as any)}
-          />
-          <View style={styles.divider} />
-          <MacroProgress
-            icon="flame-outline"
-            name="Calories"
-            val={`${log.calorie_intake} / ${goals.calorie_goal} kcal`}
-            pct={calPct}
-            color={C.calories}
-            onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'nutrition' } } as any)}
-          />
-        </View>
-      </Card>
+      {(() => {
+        const toWater = () => router.push({ pathname: '/tracker', params: { openSection: 'water' } } as any);
+        const toFood = () => router.push({ pathname: '/tracker', params: { openSection: 'nutrition' } } as any);
+        const waterLeft = Math.max(0, goals.water_goal - (log.water_intake || 0));
+        return (
+          <Card style={isActive ? styles.activeCardGlow : undefined}>
+            <View style={{ padding: 14 }}>
+              {/* Water: the big one, tap anywhere to log */}
+              <TouchableOpacity style={[styles.waterHero, { backgroundColor: C.water + '14', borderColor: C.water + '40' }]}
+                onPress={toWater} activeOpacity={0.85}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={[styles.waterIcon, { backgroundColor: C.water + '26' }]}>
+                    <Ionicons name="water" size={22} color={C.water} />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={[styles.intakeLbl, { color: C.muted }]}>WATER</Text>
+                    <Text style={[styles.waterBig, { color: C.text }]}>
+                      {(log.water_intake || 0).toFixed(2).replace(/\.?0+$/, '') || '0'}
+                      <Text style={[styles.waterUnit, { color: C.muted }]}> / {goals.water_goal} L</Text>
+                    </Text>
+                  </View>
+                  <View style={[styles.waterAdd, { backgroundColor: C.water }]}>
+                    <Ionicons name="add" size={16} color="#fff" />
+                    <Text style={styles.waterAddTxt}>Log</Text>
+                  </View>
+                </View>
+                <View style={[styles.waterTrack, { backgroundColor: C.water + '22' }]}>
+                  <View style={[styles.waterFill, { width: `${Math.round(waterPct * 100)}%`, backgroundColor: C.water }]} />
+                </View>
+                <Text style={[styles.waterNote, { color: waterPct >= 1 ? C.green : C.textSub }]}>
+                  {waterPct >= 1 ? 'Goal reached. Nice work!' : `${+waterLeft.toFixed(2)} L to go · ${Math.round(waterPct * 100)}%`}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Protein and calories side by side */}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                {[
+                  { name: 'Protein', icon: 'restaurant', color: C.protein, pct: proteinPct, val: Math.round(log.protein_intake), goal: goals.protein_goal, unit: 'g' },
+                  { name: 'Calories', icon: 'flame', color: C.calories, pct: calPct, val: Math.round(log.calorie_intake), goal: goals.calorie_goal, unit: 'kcal' },
+                ].map(m => (
+                  <TouchableOpacity key={m.name} style={[styles.macroTile, { backgroundColor: C.bg, borderColor: C.border }]}
+                    onPress={toFood} activeOpacity={0.85}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name={m.icon as any} size={14} color={m.color} />
+                      <Text style={[styles.intakeLbl, { color: C.muted }]}>{m.name.toUpperCase()}</Text>
+                      <Text style={[styles.macroPct, { color: m.color }]}>{Math.round(m.pct * 100)}%</Text>
+                    </View>
+                    <Text style={[styles.macroBig, { color: C.text }]} numberOfLines={1} adjustsFontSizeToFit>
+                      {m.val}<Text style={[styles.waterUnit, { color: C.muted }]}> / {m.goal} {m.unit}</Text>
+                    </Text>
+                    <View style={[styles.macroTrack, { backgroundColor: m.color + '22' }]}>
+                      <View style={[styles.waterFill, { width: `${Math.round(m.pct * 100)}%`, backgroundColor: m.color }]} />
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </Card>
+        );
+      })()}
     </View>
   );
 
@@ -474,61 +493,53 @@ export default function DashboardScreen() {
           <Ionicons name="reorder-two" size={18} color={isActive ? C.green : C.muted + '77'} />
         </View>
       </View>
-      <View style={styles.twoColSection}>
-        <View style={styles.colLeft}>
-          <Card style={[{ flex: 1 }, isActive && styles.activeCardGlow]}>
-            <View style={[styles.weekStatsBox, { flex: 1, justifyContent: 'space-evenly' }]}>
-              <View style={styles.weekStatItem}>
-                <Ionicons name="trophy-outline" size={24} color={C.purple} style={styles.weekStatIcon} />
-                <Text style={[styles.weekStatVal, { color: C.purple }]}>{weekly?.workouts || 0}</Text>
-                <Text style={styles.weekStatLbl}>Workouts</Text>
-              </View>
-              <View style={styles.weekStatItem}>
-                <Ionicons name="water-outline" size={24} color={C.water} style={styles.weekStatIcon} />
-                <Text style={[styles.weekStatVal, { color: C.water }]}>{weekly?.waterSuccess || 0}</Text>
-                <Text style={styles.weekStatLbl}>Water Days</Text>
-              </View>
-              <View style={styles.weekStatItem}>
-                <Ionicons name="flash-outline" size={24} color={C.green} style={styles.weekStatIcon} />
-                <Text style={[styles.weekStatVal, { color: C.green }]}>{weekly?.creatineTaken || 0}</Text>
-                <Text style={styles.weekStatLbl}>Creatine</Text>
-              </View>
-            </View>
-          </Card>
-        </View>
+      <Card style={isActive ? styles.activeCardGlow : undefined}>
+        <View style={{ padding: 14 }}>
+          {/* Today: three habit tiles, tap one to see how it's tracked */}
+          <View style={styles.habitHead}>
+            <Text style={[styles.intakeLbl, { color: C.muted }]}>TODAY</Text>
+            <Text style={[styles.habitCount, { color: habitsDone === habits.length ? C.green : C.textSub }]}>
+              {habitsDone} of {habits.length} done
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {habits.map(h => (
+              <TouchableOpacity key={h.label} activeOpacity={0.8}
+                style={[styles.habitTile, { backgroundColor: h.done ? C.green + '18' : C.bg, borderColor: h.done ? C.green + '66' : C.border }]}
+                onPress={() => showAlert(h.done ? `${h.label} done` : `${h.label} pending`, h.info)}>
+                <View style={[styles.habitTileIcon, { backgroundColor: h.done ? C.green : C.border + '80' }]}>
+                  <Ionicons name={(h.done ? 'checkmark' : h.icon) as any} size={16} color={h.done ? '#fff' : C.muted} />
+                </View>
+                <Text style={[styles.habitTileLbl, { color: h.done ? C.text : C.muted }]}>{h.label}</Text>
+                <Text style={[styles.habitTileState, { color: h.done ? C.green : C.muted }]}>{h.done ? 'Done' : 'Pending'}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        <View style={styles.colRight}>
-          <Card style={[{ flex: 1 }, isActive && styles.activeCardGlow]}>
-            <View style={[styles.habitsBox, { flex: 1, justifyContent: 'space-between' }]}>
-              <View>
-                {habits.map((h, i) => (
-                  <TouchableOpacity
-                    key={i}
-                    style={styles.habitRow}
-                    activeOpacity={0.7}
-                    onPress={() => showAlert(
-                      h.done ? `✅ ${h.label} Done!` : `○ ${h.label} Pending`,
-                      h.info
-                    )}
-                  >
-                    <View style={styles.habitIconWrap}>
-                      <Ionicons name={h.icon as any} size={16} color={h.done ? C.green : C.muted} />
-                    </View>
-                    <Text style={[styles.habitLabel, h.done && { color: C.text, fontWeight: '700' }]}>{h.label}</Text>
-                    <Text style={{ color: h.done ? C.green : C.muted, fontWeight: '800' }}>
-                      {h.done ? '✓' : '○'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+          {/* This week: days hit out of the days so far */}
+          <View style={[styles.habitHead, { marginTop: 16 }]}>
+            <Text style={[styles.intakeLbl, { color: C.muted }]}>THIS WEEK</Text>
+            <Text style={[styles.habitCount, { color: C.muted }]}>Day {weekly?.daysElapsed ?? 1} of 7</Text>
+          </View>
+          {[
+            { label: 'Workouts', icon: 'barbell', color: C.purple, n: weekly?.workouts || 0 },
+            { label: 'Water goal', icon: 'water', color: C.water, n: weekly?.waterSuccess || 0 },
+            { label: 'Protein goal', icon: 'restaurant', color: C.protein, n: weekly?.proteinSuccess || 0 },
+          ].map(s => {
+            const days = weekly?.daysElapsed || 1;
+            return (
+              <View key={s.label} style={styles.weekRow}>
+                <Ionicons name={s.icon as any} size={14} color={s.color} style={{ width: 18 }} />
+                <Text style={[styles.weekRowLbl, { color: C.text }]}>{s.label}</Text>
+                <View style={[styles.weekTrack, { backgroundColor: s.color + '22' }]}>
+                  <View style={[styles.waterFill, { width: `${Math.min(100, Math.round((s.n / days) * 100))}%`, backgroundColor: s.color }]} />
+                </View>
+                <Text style={[styles.weekRowNum, { color: s.color }]}>{s.n}<Text style={{ color: C.muted, fontWeight: '600' }}>/{days}</Text></Text>
               </View>
-              <View style={styles.habitProgressBox}>
-                <Text style={styles.habitProgressTxt}>{habitsDone} / {habits.length} Complete</Text>
-                <ProgressBar value={habitsDone / habits.length} color={C.green} height={6} />
-              </View>
-            </View>
-          </Card>
+            );
+          })}
         </View>
-      </View>
+      </Card>
     </View>
   );
 
@@ -1111,6 +1122,32 @@ function makeStyles(C: any, isDark?: boolean) {
       paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', marginTop: 4,
     },
     customizeTxt: { fontSize: 13, fontWeight: '800' },
+    // Intake Goals widget
+    intakeLbl: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+    waterHero: { borderRadius: 18, borderWidth: 1, padding: 14 },
+    waterIcon: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+    waterBig: { fontSize: 24, fontWeight: '900', marginTop: 1 },
+    waterUnit: { fontSize: 13, fontWeight: '700' },
+    waterAdd: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
+    waterAddTxt: { fontSize: 13, fontWeight: '800', color: '#fff' },
+    waterTrack: { height: 10, borderRadius: 5, overflow: 'hidden', marginTop: 12 },
+    waterFill: { height: '100%', borderRadius: 5 },
+    waterNote: { fontSize: 12, fontWeight: '700', marginTop: 7 },
+    macroTile: { flex: 1, borderRadius: 16, borderWidth: 1, padding: 12 },
+    macroPct: { marginLeft: 'auto', fontSize: 11, fontWeight: '800' },
+    macroBig: { fontSize: 18, fontWeight: '900', marginTop: 6 },
+    macroTrack: { height: 6, borderRadius: 3, overflow: 'hidden', marginTop: 8 },
+    // This Week & Habits widget
+    habitHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+    habitCount: { fontSize: 12, fontWeight: '800' },
+    habitTile: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 16, borderWidth: 1 },
+    habitTileIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+    habitTileLbl: { fontSize: 13, fontWeight: '800' },
+    habitTileState: { fontSize: 10, fontWeight: '700', marginTop: 1, textTransform: 'uppercase', letterSpacing: 0.4 },
+    weekRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+    weekRowLbl: { width: 92, fontSize: 13, fontWeight: '700' },
+    weekTrack: { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden' },
+    weekRowNum: { width: 34, textAlign: 'right', fontSize: 13, fontWeight: '900' },
     // Exercise Library widget
     libIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
     libTitle: { fontSize: 15, fontWeight: '800' },
