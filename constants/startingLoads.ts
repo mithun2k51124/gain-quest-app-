@@ -182,6 +182,8 @@ export const LOADS: Record<string, [LoadType, number]> = {
 };
 
 // Weights that exist for implements that only come in fixed sizes
+/** Dumbbells found in most gyms: 2 and 2.5 kg, then 2.5 kg steps to 25, then 5 kg steps. */
+export const DUMBBELL_SIZES = [2, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 30, 35, 40, 45, 50];
 export const KETTLEBELL_SIZES = [4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32];
 export const PLATE_SIZES = [1.25, 2.5, 5, 10, 15, 20];
 export const MEDBALL_SIZES = [2, 3, 4, 5, 6, 8, 10];

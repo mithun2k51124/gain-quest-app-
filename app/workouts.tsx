@@ -40,7 +40,7 @@ import { Card, Btn, MuscleTag, SectionHeader, EmptyState } from '../components/u
 import BodyAnatomy from '../components/BodyAnatomy';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 import { findExercise } from '../constants/exerciseCatalog';
-import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText } from '../components/SplitWizard';
+import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence } from '../components/SplitWizard';
 import { NestableScrollContainer, NestableDraggableFlatList, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -520,19 +520,21 @@ function ExerciseLogCard({
   const { C } = useTheme();
   const styles = makeStyles(C);
   const { showAlert } = useCustomAlert();
-  // What the split builder set for this exercise today: shown as a target, and the
-  // starting weight becomes the weight box's hint
+  // What the split builder set for this exercise today, shown as the goal
   const [target] = useState(() => targetFor(getSplitConfig(), ex.day_of_week, ex.exercise_name));
+  // Bodyweight moves (push-ups, pull-ups, dips, band work...) are logged as reps only
+  const [repsOnly] = useState(() => isRepsOnly(ex.exercise_name));
   const [sets, setSets] = useState('1');
   // Start the reps at the bottom of the target range ('8–12' → 8); timed holds keep the default
   const [reps, setReps] = useState(() => target?.reps.match(/^(\d+)(?:–\d+)?$/)?.[1] ?? '8');
-  const [weight, setWeight] = useState('');
+  // The plan's starting weight is filled in, ready to log or change
+  const [weight, setWeight] = useState(() => (!repsOnly && target?.kg !== undefined ? String(target.kg) : ''));
 
   const [setsModal, setSetsModal] = useState(false);
   const [repsModal, setRepsModal] = useState(false);
 
   const handleLog = () => {
-    const w = parseFloat(weight);
+    const w = repsOnly ? 0 : parseFloat(weight);
     if (isNaN(w)) {
       showAlert('Weight', 'Enter a valid weight.');
       return;
@@ -541,6 +543,12 @@ function ExerciseLogCard({
     const r = parseInt(reps, 10);
     onLog(s, r, w);
   };
+  const muscleColor = C.mg[ex.muscle_group] || C.accent;
+  // Goal stats: weight shows the number with what it means ('10 kg' · 'in each hand')
+  const loadStat = !target ? null
+    : target.kg === undefined ? { value: target.load ?? 'Bodyweight', label: 'no weights' }
+    : target.load?.startsWith('+') ? { value: `+${target.kg} kg`, label: 'added weight' }
+    : { value: `${target.kg} kg`, label: target.load?.endsWith(' each') ? 'in each hand' : 'weight' };
 
   return (
     <Card accent={C.mg[ex.muscle_group] || C.accent}>
@@ -560,15 +568,27 @@ function ExerciseLogCard({
           <ExerciseGuideButton name={ex.exercise_name} color={C.mg[ex.muscle_group] || C.accent} variant="pill" />
         </View>
 
-        {target && (
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14, paddingHorizontal: 10, paddingVertical: 8,
-            borderRadius: 10, backgroundColor: C.accent + '14', borderWidth: 1, borderColor: C.accent + '40',
-          }}>
-            <Ionicons name="flag-outline" size={14} color={C.accent} />
-            <Text style={{ flex: 1, fontSize: 13, fontWeight: '700', color: C.text }}>
-              Target <Text style={{ color: C.accent, fontWeight: '800' }}>{targetText(target)}</Text>
-            </Text>
+        {target && loadStat && (
+          <View style={styles.goalBox}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <Ionicons name="flag-outline" size={13} color={C.accent} />
+              <Text style={styles.goalKicker}>TODAY'S GOAL</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={styles.goalStat}>
+                <Text style={styles.goalValue}>{target.sets}</Text>
+                <Text style={styles.goalLabel}>sets</Text>
+              </View>
+              <View style={styles.goalStat}>
+                <Text style={styles.goalValue}>{target.reps}</Text>
+                <Text style={styles.goalLabel}>{/\d s\b/.test(target.reps) ? 'hold each set' : 'reps per set'}</Text>
+              </View>
+              <View style={[styles.goalStat, { flex: 1.3 }]}>
+                <Text style={styles.goalValue} numberOfLines={1} adjustsFontSizeToFit>{loadStat.value}</Text>
+                <Text style={styles.goalLabel}>{loadStat.label}</Text>
+              </View>
+            </View>
+            <Text style={styles.goalSentence}>{targetSentence(target)} Log each set below when you finish it.</Text>
           </View>
         )}
 
@@ -576,9 +596,10 @@ function ExerciseLogCard({
           <View style={{ marginBottom: 16 }}>
             {loggedSets.map((s, i) => (
               <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.mg[ex.muscle_group] || C.accent, marginRight: 8 }} />
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: muscleColor, marginRight: 8 }} />
                 <Text style={{ color: C.text, fontSize: 14 }}>
-                  Set {i + 1}:  <Text style={{ fontWeight: '700' }}>{s.reps}</Text> reps @ <Text style={{ fontWeight: '700' }}>{s.weight}</Text> kg
+                  Set {i + 1}:  <Text style={{ fontWeight: '700' }}>{s.reps}</Text> reps
+                  {!repsOnly && <> @ <Text style={{ fontWeight: '700' }}>{s.weight}</Text> kg</>}
                 </Text>
               </View>
             ))}
@@ -594,21 +615,23 @@ function ExerciseLogCard({
             <Text style={styles.setsLabel}>Reps</Text>
             <Text style={styles.setsVal}>{reps}</Text>
           </TouchableOpacity>
-          <View style={[styles.setsBox, { flex: 2 }]}>
-            <Text style={styles.setsLabel}>Weight (kg)</Text>
-            <TextInput
-              style={styles.setsInput}
-              keyboardType="decimal-pad"
-              value={weight}
-              onChangeText={setWeight}
-              placeholder={target?.kg !== undefined ? String(target.kg) : '60'}
-              placeholderTextColor={C.muted}
-            />
-          </View>
+          {!repsOnly && (
+            <View style={[styles.setsBox, { flex: 2 }]}>
+              <Text style={styles.setsLabel}>Weight (kg)</Text>
+              <TextInput
+                style={styles.setsInput}
+                keyboardType="decimal-pad"
+                value={weight}
+                onChangeText={setWeight}
+                placeholder="60"
+                placeholderTextColor={C.muted}
+              />
+            </View>
+          )}
         </View>
 
         <View style={{ marginTop: 16 }}>
-          <Btn label="+ Log Set" color={C.mg[ex.muscle_group] || C.accent} onPress={handleLog} small />
+          <Btn label="+ Log Set" color={muscleColor} onPress={handleLog} small />
         </View>
       </View>
 
@@ -1144,7 +1167,7 @@ export default function WorkoutsScreen() {
                               <View style={[styles.exDot, { backgroundColor: C.mg[ex.muscle_group] || C.accent }]} />
                               <Text style={styles.exName}>{ex.exercise_name}</Text>
                               <Text style={styles.exDetail}>
-                                {ex.sets}x{ex.reps} @ {ex.weight}{ex.unit}
+                                {ex.sets}x{ex.reps}{ex.weight > 0 ? ` @ ${ex.weight}${ex.unit}` : ''}
                               </Text>
                             </View>
                           ))}
@@ -1569,6 +1592,29 @@ function makeStyles(C: any) { return StyleSheet.create({
     width: '100%',
   },
   btnRow: { flexDirection: 'row', alignItems: 'center' },
+  // Log tab: the split builder's goal for an exercise
+  goalBox: {
+    marginBottom: 14,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: C.accent + '12',
+    borderWidth: 1,
+    borderColor: C.accent + '40',
+  },
+  goalKicker: { fontSize: 11, fontWeight: '800', color: C.accent, letterSpacing: 0.6 },
+  goalStat: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  goalValue: { fontSize: 17, fontWeight: '800', color: C.text },
+  goalLabel: { fontSize: 10, fontWeight: '700', color: C.muted, marginTop: 2, textAlign: 'center' },
+  goalSentence: { fontSize: 12, fontWeight: '600', color: C.textSub, marginTop: 10, lineHeight: 17 },
   exRow: {
     flexDirection: 'row',
     alignItems: 'center',

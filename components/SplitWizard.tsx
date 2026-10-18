@@ -53,9 +53,34 @@ export function targetFor(cfg: SplitConfig | null, day: string, exercise: string
   return m ? { sets: Number(m[1]), reps: m[2] } : null;
 }
 
-/** '3 × 8–12 · 10 kg each' */
+/** Timed targets ('30–60 s', '20–40 s each side') are holds, not reps. */
+const isTimed = (reps: string) => /\d s\b/.test(reps);
+
+/** '3 sets × 8–12 reps', or '3 sets × 30–60 s' for holds */
+export function setsRepsText(t: { sets: number; reps: string }): string {
+  return `${t.sets} sets × ${t.reps}${isTimed(t.reps) ? '' : ' reps'}`;
+}
+
+/** '3 sets × 8–12 reps · 10 kg each' */
 export function targetText(t: ExerciseTarget): string {
-  return `${t.sets} × ${t.reps}${t.load ? ` · ${t.load}` : ''}`;
+  return `${setsRepsText(t)}${t.load ? ` · ${t.load}` : ''}`;
+}
+
+/** The target in plain words: 'Do 3 sets of 8–12 reps with 10 kg in each hand.' */
+export function targetSentence(t: ExerciseTarget): string {
+  if (isTimed(t.reps)) return `Hold for ${t.reps}, ${t.sets} times, resting between each.`;
+  const load = t.load ?? '';
+  let using = '';
+  if (t.kg !== undefined) {
+    using = load.endsWith(' each') ? ` with ${t.kg} kg in each hand`
+      : load.startsWith('+') ? ` with ${t.kg} kg added`
+      : load.endsWith(' plate') ? ` holding a ${t.kg} kg plate`
+      : load.endsWith(' ball') ? ` with a ${t.kg} kg ball`
+      : ` with ${t.kg} kg`;
+  } else if (/band$/i.test(load)) {
+    using = ` with a ${load.toLowerCase()}`;
+  }
+  return `Do ${t.sets} sets of ${t.reps} reps${using}.`;
 }
 
 type StepKey = 'level' | 'place' | 'equipment' | 'strength' | 'skills' | 'minutes' | 'days' | 'rest' | 'plan';
@@ -704,7 +729,7 @@ export function SplitWizard({ visible, mode = 'setup', onClose, onApplied }: {
                                   <View style={styles.tags}>
                                     <View style={styles.tag}>
                                       <Ionicons name="repeat-outline" size={11} color={C.textSub} />
-                                      <Text style={styles.tagTxt}>{e.sets} × {e.reps}</Text>
+                                      <Text style={styles.tagTxt}>{setsRepsText(e)}</Text>
                                     </View>
                                     <View style={[styles.tag, { backgroundColor: C.accent + '14', borderColor: C.accent + '40' }]}>
                                       <Ionicons name={e.kg !== undefined ? 'barbell-outline' : 'body-outline'} size={11} color={C.accent} />

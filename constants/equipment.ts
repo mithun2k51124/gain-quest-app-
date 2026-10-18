@@ -3,6 +3,7 @@
 // 'none' = no equipment; floor, wall, chair, stairs, a towel and the like are assumed.
 // Each entry was checked against the exercise's own instructions, not just the dataset label.
 import REQUIRES from './exerciseEquipment.json';
+import { LOADS } from './startingLoads';
 
 export type EquipmentId =
   | 'dumbbells' | 'barbell' | 'kettlebell' | 'kettlebell_pair' | 'bench' | 'adj_bench' | 'rack'
@@ -89,6 +90,24 @@ export function canDo(name: string, owned: Set<string>): boolean {
 
 export function missingItems(name: string, owned: Set<string>): string[] {
   return (REQ[name] ?? []).filter(i => !owned.has(i));
+}
+
+// Things you train on or with, but never pick a weight for
+const NO_WEIGHT = new Set([
+  'none', 'pullup_bar', 'dip_bars', 'rings', 'stability_ball', 'ab_wheel', 'box', 'jump_rope',
+  'foam_roller', 'bands', 'bench', 'adj_bench',
+]);
+
+/**
+ * Exercises done with bodyweight only (push-ups, pull-ups, dips, band and ring work...), so they're
+ * logged as reps with no weight. The split builder's starting-weight table decides for the moves it
+ * plans; otherwise it's the exercise's equipment.
+ */
+export function isBodyweightExercise(name: string): boolean {
+  const load = LOADS[name];
+  if (load) return load[0] === 'bw';
+  const req = REQ[name];
+  return !!req && req.every(i => NO_WEIGHT.has(i));
 }
 
 /** How many library exercises fit this equipment (partner exercises left out). */

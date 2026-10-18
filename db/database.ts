@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { BODYWEIGHT_EXERCISES } from '../constants/theme';
+import { isBodyweightExercise } from '../constants/equipment';
 import { LEGACY_EXERCISE_NAMES } from '../constants/legacyExerciseNames';
 
 type DbRunResult = {
@@ -809,7 +810,9 @@ export function isRepsOnly(exerciseName: string): boolean {
   const custom = getDb().getFirstSync<{ kind: string }>(
     'SELECT kind FROM custom_exercises WHERE name=?', [exerciseName]
   );
-  return custom ? custom.kind === 'reps' : BODYWEIGHT_EXERCISES.includes(exerciseName);
+  return custom
+    ? custom.kind === 'reps'
+    : BODYWEIGHT_EXERCISES.includes(exerciseName) || isBodyweightExercise(exerciseName);
 }
 
 /** Comparable PR score: max reps for reps-only lifts, Epley e1RM otherwise. */

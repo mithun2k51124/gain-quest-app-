@@ -24,7 +24,7 @@ import {
   Candidate, Level, PatternKey, SkillKey, PATTERNS, POOLS, SKILL_ORDER,
 } from '../constants/exercisePools';
 import {
-  LOADS, KETTLEBELL_SIZES, PLATE_SIZES, MEDBALL_SIZES, BAR_KG, EZ_BAR_KG, SMITH_MIN_KG,
+  LOADS, DUMBBELL_SIZES, KETTLEBELL_SIZES, PLATE_SIZES, MEDBALL_SIZES, BAR_KG, EZ_BAR_KG, SMITH_MIN_KG,
 } from '../constants/startingLoads';
 
 export type { Level };
@@ -393,6 +393,9 @@ const roundTo = (kg: number, step: number) => Math.round(kg / step) * step;
 const nearestSize = (kg: number, sizes: number[]) =>
   sizes.filter(s => s <= kg * 1.1).pop() ?? sizes[0];
 const capAt = (kg: number, cap?: number) => (cap !== undefined ? Math.min(kg, cap) : kg);
+/** The closest size to the target (the lighter one on a tie). */
+const closestSize = (kg: number, sizes: number[]) =>
+  sizes.reduce((best, s) => (Math.abs(s - kg) < Math.abs(best - kg) ? s : best), sizes[0]);
 
 /** How heavy to start an exercise, as a label for the plan and a number for the log screen. */
 function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: string; kg?: number } {
@@ -407,8 +410,9 @@ function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: stri
   switch (type) {
     case 'db':
     case 'db1': {
-      // Light dumbbells go up in 1 kg steps, heavier ones in 2.5 kg
-      const kg = capAt(target < 10 ? Math.max(1, Math.round(target)) : roundTo(target, 2.5), dumbbell);
+      // Only sizes a gym (or the user's own set, up to their heaviest) actually has
+      const sizes = DUMBBELL_SIZES.filter(s => dumbbell === undefined || s <= dumbbell);
+      const kg = closestSize(target, sizes.length ? sizes : [DUMBBELL_SIZES[0]]);
       return out(kg, type === 'db' ? `${kg} kg each` : `${kg} kg`);
     }
     case 'kb':

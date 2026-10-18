@@ -17,6 +17,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { EXERCISE_LIBRARY, BODYWEIGHT_EXERCISES } from '../constants/theme';
+import { isBodyweightExercise } from '../constants/equipment';
 import { WheelPicker } from '../components/WheelPicker';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 
@@ -234,8 +235,9 @@ export default function PRScreen() {
 
   const muscleOf = (name: string) => customMap[name]?.muscle_group ?? LIB_MUSCLE[name] ?? 'Other';
   const colorOf = (name: string) => C.mg[muscleOf(name)] ?? C.muted;
+  // Same rule as isRepsOnly in db/database.ts
   const repsOnly = (name: string) =>
-    customMap[name] ? customMap[name].kind === 'reps' : BODYWEIGHT_EXERCISES.includes(name);
+    customMap[name] ? customMap[name].kind === 'reps' : BODYWEIGHT_EXERCISES.includes(name) || isBodyweightExercise(name);
   const score = (name: string, w: number, r: number) => (repsOnly(name) ? r : calc1RM(w, r));
   const liftText = (name: string, w: number, r: number) => (repsOnly(name) ? `${r} reps` : `${fmtKg(w)} kg × ${r}`);
   const scoreText = (name: string, s: number) => (repsOnly(name) ? `${s} reps` : `e1RM ${fmtKg(s)}`);
