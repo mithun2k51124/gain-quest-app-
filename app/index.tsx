@@ -1,27 +1,22 @@
 // app/index.tsx — Home Dashboard with Interactive Drag-and-Drop Widgets
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  RefreshControl,
   TouchableOpacity,
   TextInput,
   Modal,
-  Vibration,
-  Animated,
   Image,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, G } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
-import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import {
   getTodayLog,
   getGoals,
   updateGoals,
-  addWater,
   getStreak,
   getLatestWeight,
   logWeight,
@@ -31,14 +26,22 @@ import {
   setSetting,
   getWorkoutPlanExercises,
   getExercisesForDate,
+  getWorkoutDates,
+  toDateStr,
   todayStr,
   DailyLog,
   Goals,
   Streak,
   WorkoutPlan,
 } from '../db/database';
-import { Card, ProgressBar, Ring, MuscleTag, SectionHeader } from '../components/ui';
+import { Card, ProgressBar, MuscleTag, SectionHeader } from '../components/ui';
 import { SettingsButton } from '../components/SettingsButton';
+import { HeaderIconButton } from '../components/HeaderIconButton';
+import { HomeOverview, OverviewData } from '../components/HomeOverview';
+import { BatteryMeter } from '../components/BatteryMeter';
+import { DumbbellIcon } from '../components/DumbbellIcon';
+import { BookIcon } from '../components/BookIcon';
+import { SplitBuildIcon } from '../components/SplitBuildIcon';
 import { useTheme } from '../contexts/ThemeContext';
 import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -46,11 +49,12 @@ import { RemindersWidget, RemindersSheet } from '../components/Reminders';
 import { ExerciseLibrary } from '../components/ExerciseLibrary';
 import { ExerciseGuideModal } from '../components/ExerciseGuide';
 import { getSplitConfig, targetFor } from '../components/SplitWizard';
-import { DragWidget, DRAG_LIST_PROPS } from '../components/DragWidget';
+import { DragBoard, DragBoardHandle, WidgetLabel } from '../components/DragWidget';
 import { EXERCISE_CATALOG, findExercise } from '../constants/exerciseCatalog';
 import { turnOnReminders, notificationsAvailable, remindersEnabled, REMINDERS_UNAVAILABLE_MSG } from '../utils/reminders';
+import { currentPicks, subscribePicks } from '../utils/libraryPicks';
 
-export type HomeSectionKey = 'workout' | 'overview' | 'intake' | 'week_habits' | 'reminders' | 'library';
+export type HomeSectionKey = 'workout' | 'overview' | 'week_habits' | 'reminders' | 'library';
 
 // Order on a fresh install (and after Reset); a saved order wins
 const DEFAULT_SECTIONS: HomeSectionKey[] = [
@@ -58,17 +62,33 @@ const DEFAULT_SECTIONS: HomeSectionKey[] = [
   'overview',
   'library',
   'week_habits',
-  'intake',
   'reminders',
 ];
 
-// Exercise Library widget: three picks a day from these, so the preview changes daily
-const FEATURED = [
-  'Barbell Bench Press - Medium Grip', 'Barbell Full Squat', 'Pullups', 'Dumbbell Shoulder Press',
-  'Romanian Deadlift', 'Plank', 'Incline Dumbbell Press', 'Bent Over Barbell Row', 'Hammer Curls',
-  'Triceps Pushdown', 'Goblet Squat', 'Dumbbell Lunges', 'Face Pull', 'Hanging Leg Raise',
-  'Seated Cable Rows', 'Side Lateral Raise', 'Barbell Hip Thrust', 'Wide-Grip Lat Pulldown',
-].map(n => findExercise(n)).filter((e): e is NonNullable<typeof e> => !!e);
+// Names and icons for the Customize sheet and the tags shown while a widget is being moved
+const WIDGET_INFO: Record<HomeSectionKey, { title: string; icon: string }> = {
+  workout:     { title: "Today's Workout", icon: 'barbell-outline' },
+  overview:    { title: 'Overview', icon: 'grid-outline' },
+  week_habits: { title: "Today's Habits", icon: 'battery-charging-outline' },
+  reminders:   { title: 'Reminders', icon: 'notifications-outline' },
+  library:     { title: 'Exercise Library', icon: 'book-outline' },
+};
+
+/** Monday → Sunday: whether a workout was logged on each day of this week. */
+function weekTrained(): { days: boolean[]; todayIndex: number } {
+  const now = new Date();
+  const todayIndex = (now.getDay() + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - todayIndex);
+  const trained = new Set(getWorkoutDates());
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return trained.has(toDateStr(d));
+  });
+  return { days, todayIndex };
+}
+
 /**
  * Today's planned exercises and how many are finished: every target set logged (one set
  * when the exercise has no split target).
@@ -85,11 +105,6 @@ function todaysWorkoutProgress(): { done: number; total: number } {
   return { done, total: names.length };
 }
 
-function todaysPicks() {
-  const day = Math.floor(Date.now() / 86400000);
-  return [0, 1, 2].map(i => FEATURED[(day * 3 + i) % FEATURED.length]);
-}
-
 export default function DashboardScreen() {
   const { showAlert } = useCustomAlert();
   const router = useRouter();
@@ -101,7 +116,8 @@ export default function DashboardScreen() {
   const [weight, setWeight] = useState<number | null>(null);
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
   const [weekly, setWeekly] = useState<any>(null);
-  const [refresh, setRefresh] = useState(false);
+  const [week, setWeek] = useState<{ days: boolean[]; todayIndex: number }>({ days: [], todayIndex: 0 });
+  const [hasPlan, setHasPlan] = useState(true);
 
   // Body weight popup
   const [weightPopup, setWeightPopup] = useState(false);
@@ -124,8 +140,14 @@ export default function DashboardScreen() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [workoutProgress, setWorkoutProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const [guideFor, setGuideFor] = useState<string | null>(null);
-  const picks = useMemo(todaysPicks, []);
-  const listRef = useRef<any>(null);
+  // Three new library picks every time the app is opened
+  const [pickNames, setPickNames] = useState(currentPicks);
+  useEffect(() => subscribePicks(setPickNames), []);
+  const picks = useMemo(
+    () => pickNames.map(n => findExercise(n)).filter((e): e is NonNullable<typeof e> => !!e),
+    [pickNames]
+  );
+  const boardRef = useRef<DragBoardHandle>(null);
 
   // Draggable section order
   const [sections, setSections] = useState<HomeSectionKey[]>(() => {
@@ -151,6 +173,9 @@ export default function DashboardScreen() {
     setWeight(getLatestWeight());
     setPlan(getTodaysPlan());
     setWeekly(getWeeklyStats());
+    setWeek(weekTrained());
+    // A plan exists once a split was built or any exercise was put in the planner
+    setHasPlan(!!getSplitConfig() || getWorkoutPlanExercises().length > 0);
   }, []);
 
   useFocusEffect(
@@ -160,13 +185,12 @@ export default function DashboardScreen() {
     }, [load])
   );
 
-  const onRefresh = () => {
-    setRefresh(true);
+  const onRefresh = useCallback(() => {
     load();
-    setRefresh(false);
-  };
+    setRemindersKey(k => k + 1);
+  }, [load]);
 
-  const handleDragEnd = ({ data }: { data: HomeSectionKey[] }) => {
+  const handleDragEnd = useCallback((data: HomeSectionKey[]) => {
     if (!data || !Array.isArray(data) || data.length === 0) return;
     const valid = Array.from(new Set(data.filter(k => DEFAULT_SECTIONS.includes(k))));
     const missing = DEFAULT_SECTIONS.filter(k => !valid.includes(k));
@@ -175,8 +199,7 @@ export default function DashboardScreen() {
     try {
       setSetting('home_sections_order', JSON.stringify(finalData));
     } catch (e) { logError('homeLayout', e); }
-    try { Vibration.vibrate(22); } catch (_) {}
-  };
+  }, []);
 
   const handleResetLayout = () => {
     setSections(DEFAULT_SECTIONS);
@@ -204,24 +227,16 @@ export default function DashboardScreen() {
     setGoalModal(true);
   };
 
-  const handleSaveGoals = () => {
-    const w = parseFloat(waterGoalInput);
-    const p = parseFloat(proteinGoalInput);
-    const c = parseInt(calorieGoalInput, 10);
-
-    if (isNaN(w) || isNaN(p) || isNaN(c)) {
-      showAlert('Invalid Goals', 'Please enter valid numbers for water, protein, and calories.');
-      return;
-    }
-
-    updateGoals({
-      water_goal: Math.max(0.5, w),
-      protein_goal: Math.max(20, p),
-      calorie_goal: Math.max(500, c),
-    });
+  // Goals save as they're changed (a half-typed or empty box keeps the last good value)
+  const setGoalInput = (key: 'water_goal' | 'protein_goal' | 'calorie_goal', text: string) => {
+    ({ water_goal: setWaterGoalInput, protein_goal: setProteinGoalInput, calorie_goal: setCalorieGoalInput })[key](text);
+    const n = key === 'calorie_goal' ? parseInt(text, 10) : parseFloat(text);
+    const min = { water_goal: 0.5, protein_goal: 20, calorie_goal: 500 }[key];
+    if (!isNaN(n)) updateGoals({ [key]: Math.max(min, n) });
+  };
+  const closeGoalsModal = () => {
     setGoalModal(false);
     load();
-    showAlert('Goals Updated ✓', `Water: ${w}L  •  Protein: ${p}g  •  Calories: ${c} kcal`);
   };
 
   const handleEditFromModal = (key: HomeSectionKey) => {
@@ -234,11 +249,9 @@ export default function DashboardScreen() {
         case 'overview':
           router.push('/overall' as any);
           break;
-        case 'intake':
-          openGoalsModal();
-          break;
         case 'week_habits':
-          router.push({ pathname: '/workouts', params: { openTab: 'Log' } } as any);
+          // The habits' batteries fill against these goals
+          openGoalsModal();
           break;
         case 'reminders':
           setRemindersOpen(true);
@@ -279,26 +292,36 @@ export default function DashboardScreen() {
     : workoutProgress.done > 0 ? `${workoutProgress.done}/${workoutProgress.total} done`
     : 'Tap to Log';
 
+  // Each habit's battery, in its own colour: water and protein against their goals, the workout by
+  // exercises finished (shown as just done/total, e.g. 1/3)
   const habits = [
     {
-      icon: 'barbell-outline',
+      icon: 'barbell',
       label: 'Workout',
+      color: C.purple,
       done: workoutDone,
-      info: workoutProgress.total > 0
-        ? `Done when every exercise planned for today is finished (all its sets logged). ${workoutProgress.done} of ${workoutProgress.total} finished so far.`
-        : 'Auto-tracked when you log a workout session in the Workouts tab.',
+      pct: workoutProgress.total > 0 ? workoutProgress.done / workoutProgress.total : workoutDone ? 1 : 0,
+      detail: workoutProgress.total > 0 ? `${workoutProgress.done}/${workoutProgress.total}`
+        : workoutDone ? 'Done' : plan?.muscle_groups === 'Rest' ? 'Rest day' : 'Not planned',
+      onPress: () => router.push({ pathname: '/workouts', params: { openTab: 'Log' } } as any),
     },
     {
-      icon: 'water-outline',
+      icon: 'water',
       label: 'Water',
+      color: C.water,
       done: !!log.water_goal_reached,
-      info: 'Auto-marks when your water intake reaches your daily goal.',
+      pct: waterPct,
+      detail: `${(log.water_intake || 0).toFixed(1).replace(/\.0$/, '')}/${goals.water_goal || 0} L`,
+      onPress: () => router.push({ pathname: '/tracker', params: { openSection: 'water', t: String(Date.now()) } } as any),
     },
     {
-      icon: 'restaurant-outline',
+      icon: 'restaurant',
       label: 'Protein',
+      color: C.protein,
       done: !!log.protein_goal_reached,
-      info: 'Auto-marks when your protein intake reaches your daily goal.',
+      pct: proteinPct,
+      detail: `${Math.round(log.protein_intake || 0)}/${goals.protein_goal || 0} g`,
+      onPress: () => router.push({ pathname: '/tracker', params: { openSection: 'nutrition', t: String(Date.now()) } } as any),
     },
   ];
   const habitsDone = habits.filter(h => h.done).length;
@@ -314,12 +337,35 @@ export default function DashboardScreen() {
           <Ionicons name="reorder-two" size={18} color={isActive ? C.purple : C.muted + '77'} />
         </View>
       </View>
-      {plan ? (
+      {!hasPlan ? (
+        // Nothing planned yet: no made-up workout, just the way to build one
+        <TouchableOpacity activeOpacity={0.85}
+          onPress={() => router.push({ pathname: '/workouts', params: { openTab: 'Planner', openSplit: String(Date.now()) } } as any)}>
+          <Card accent={C.purple} style={isActive ? styles.activeCardGlow : undefined}>
+            <View style={styles.workoutCardInner}>
+              <View style={styles.workoutTopRow}>
+                <View style={styles.workoutIconWrap}>
+                  <SplitBuildIcon size={24} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.workoutName}>Start working out</Text>
+                  <Text style={{ fontSize: 12, color: C.muted, marginTop: 2, fontWeight: '600' }}>
+                    Tap to build your split: a plan made for you in a few questions
+                  </Text>
+                </View>
+                <View style={[styles.statusBadge, { backgroundColor: C.purple }]}>
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>Build</Text>
+                </View>
+              </View>
+            </View>
+          </Card>
+        </TouchableOpacity>
+      ) : plan ? (
         <Card accent={C.purple} style={isActive ? styles.activeCardGlow : undefined}>
           <View style={styles.workoutCardInner}>
             <View style={styles.workoutTopRow}>
               <View style={styles.workoutIconWrap}>
-                <Ionicons name="barbell-outline" size={22} color={C.purple} />
+                <DumbbellIcon size={26} color={C.purple} />
               </View>
               <TouchableOpacity
                 style={{ flex: 1 }}
@@ -327,6 +373,14 @@ export default function DashboardScreen() {
                 onPress={() => router.push({ pathname: '/workouts', params: { openTab: 'Log' } } as any)}
               >
                 <Text style={styles.workoutName} numberOfLines={1}>{plan.plan_name || 'Workout'}</Text>
+                {plan.muscle_groups !== 'Rest' && !workoutDone && (
+                  <View style={styles.pendingRow}>
+                    <View style={[styles.pendingDot, { backgroundColor: C.orange }]} />
+                    <Text style={[styles.pendingTxt, { color: C.orange }]}>
+                      Workout pending{workoutProgress.done > 0 ? ` · ${workoutProgress.total - workoutProgress.done} exercises left` : ''}
+                    </Text>
+                  </View>
+                )}
               </TouchableOpacity>
               <View style={styles.workoutActions}>
                 <TouchableOpacity
@@ -387,11 +441,11 @@ export default function DashboardScreen() {
             <View style={styles.workoutCardInner}>
               <View style={styles.workoutTopRow}>
                 <View style={styles.workoutIconWrap}>
-                  <Ionicons name="bed-outline" size={22} color={C.purple} />
+                  <Ionicons name="calendar-outline" size={22} color={C.purple} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.workoutName}>Rest Day / No Workout</Text>
-                  <Text style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Tap to set up a workout routine</Text>
+                  <Text style={styles.workoutName}>Nothing planned today</Text>
+                  <Text style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Tap to plan today's workout</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={C.purple} />
               </View>
@@ -402,6 +456,13 @@ export default function DashboardScreen() {
     </View>
   );
 
+  const overview: OverviewData = {
+    streak: streak?.current_streak ?? 0,
+    bestStreak: streak?.longest_streak ?? 0,
+    weekTrained: week.days,
+    todayIndex: week.todayIndex,
+  };
+
   const renderOverviewSection = (isActive: boolean) => (
     <View style={styles.sectionWrap}>
       <View style={styles.sectionHeaderRow}>
@@ -410,166 +471,41 @@ export default function DashboardScreen() {
           <Ionicons name="reorder-two" size={18} color={isActive ? C.accent : C.muted + '77'} />
         </View>
       </View>
-      <View style={styles.overviewGrid}>
-        <OverviewCard
-          icon="flame-outline"
-          title="Streak"
-          val={`${streak?.current_streak ?? 0} days`}
-          sub={`Best: ${streak?.longest_streak ?? 0}`}
-          color="#FF6B35"
-        />
-        <OverviewCard
-          icon="flash-outline"
-          title="Creatine"
-          val={log.creatine_taken ? 'Taken' : 'Not Logged'}
-          sub={log.creatine_taken ? 'Logged today' : 'Tap to log'}
-          color={log.creatine_taken ? C.green : C.red}
-          onPress={() => router.push({ pathname: '/tracker', params: { openSection: 'creatine' } } as any)}
-        />
-        <OverviewCard
-          icon="barbell-outline"
-          title="Workout"
-          val={workoutDone ? 'Done' : workoutProgress.done > 0 ? `${workoutProgress.done}/${workoutProgress.total} done` : 'Pending'}
-          sub={workoutDone ? 'Tap to log more' : 'Tap to log'}
-          color={workoutDone ? C.purple : workoutProgress.done > 0 ? C.orange : C.muted}
-          onPress={() => router.push({ pathname: '/workouts', params: { openTab: 'Log' } })}
-        />
-        <OverviewCard
-          icon="scale-outline"
-          title="Body Weight"
-          val={weight ? `${weight.toFixed(1)} kg` : '-- kg'}
-          sub={weight ? `Goal: ${goals.weight_goal} kg` : 'Tap to log'}
-          color={C.water}
-          onPress={() => setWeightPopup(true)}
-        />
-      </View>
-    </View>
-  );
-
-  const renderIntakeSection = (isActive: boolean) => (
-    <View style={styles.sectionWrap}>
-      <View style={styles.sectionHeaderRow}>
-        <SectionHeader title="Intake Goals" />
-        <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? C.water : C.muted + '77'} />
-        </View>
-      </View>
-      {(() => {
-        const toWater = () => router.push({ pathname: '/tracker', params: { openSection: 'water' } } as any);
-        const toFood = () => router.push({ pathname: '/tracker', params: { openSection: 'nutrition' } } as any);
-        const waterLeft = Math.max(0, goals.water_goal - (log.water_intake || 0));
-        return (
-          <Card style={isActive ? styles.activeCardGlow : undefined}>
-            <View style={{ padding: 14 }}>
-              {/* Water: the big one, tap anywhere to log */}
-              <TouchableOpacity style={[styles.waterHero, { backgroundColor: C.water + '14', borderColor: C.water + '40' }]}
-                onPress={toWater} activeOpacity={0.85}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={[styles.waterIcon, { backgroundColor: C.water + '26' }]}>
-                    <Ionicons name="water" size={22} color={C.water} />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={[styles.intakeLbl, { color: C.muted }]}>WATER</Text>
-                    <Text style={[styles.waterBig, { color: C.text }]}>
-                      {(log.water_intake || 0).toFixed(2).replace(/\.?0+$/, '') || '0'}
-                      <Text style={[styles.waterUnit, { color: C.muted }]}> / {goals.water_goal} L</Text>
-                    </Text>
-                  </View>
-                  <View style={[styles.waterAdd, { backgroundColor: C.water }]}>
-                    <Ionicons name="add" size={16} color="#fff" />
-                    <Text style={styles.waterAddTxt}>Log</Text>
-                  </View>
-                </View>
-                <View style={[styles.waterTrack, { backgroundColor: C.water + '22' }]}>
-                  <View style={[styles.waterFill, { width: `${Math.round(waterPct * 100)}%`, backgroundColor: C.water }]} />
-                </View>
-                <Text style={[styles.waterNote, { color: waterPct >= 1 ? C.green : C.textSub }]}>
-                  {waterPct >= 1 ? 'Goal reached. Nice work!' : `${+waterLeft.toFixed(2)} L to go · ${Math.round(waterPct * 100)}%`}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Protein and calories side by side */}
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                {[
-                  { name: 'Protein', icon: 'restaurant', color: C.protein, pct: proteinPct, val: Math.round(log.protein_intake), goal: goals.protein_goal, unit: 'g' },
-                  { name: 'Calories', icon: 'flame', color: C.calories, pct: calPct, val: Math.round(log.calorie_intake), goal: goals.calorie_goal, unit: 'kcal' },
-                ].map(m => (
-                  <TouchableOpacity key={m.name} style={[styles.macroTile, { backgroundColor: C.bg, borderColor: C.border }]}
-                    onPress={toFood} activeOpacity={0.85}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Ionicons name={m.icon as any} size={14} color={m.color} />
-                      <Text style={[styles.intakeLbl, { color: C.muted }]}>{m.name.toUpperCase()}</Text>
-                      <Text style={[styles.macroPct, { color: m.color }]}>{Math.round(m.pct * 100)}%</Text>
-                    </View>
-                    <Text style={[styles.macroBig, { color: C.text }]} numberOfLines={1} adjustsFontSizeToFit>
-                      {m.val}<Text style={[styles.waterUnit, { color: C.muted }]}> / {m.goal} {m.unit}</Text>
-                    </Text>
-                    <View style={[styles.macroTrack, { backgroundColor: m.color + '22' }]}>
-                      <View style={[styles.waterFill, { width: `${Math.round(m.pct * 100)}%`, backgroundColor: m.color }]} />
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </Card>
-        );
-      })()}
+      <HomeOverview data={overview} />
     </View>
   );
 
   const renderWeekHabitsSection = (isActive: boolean) => (
     <View style={styles.sectionWrap}>
       <View style={styles.sectionHeaderRow}>
-        <SectionHeader title="This Week & Habits" />
+        <SectionHeader title="Today's Habits" />
         <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? C.green : C.muted + '77'} />
+          <Ionicons name="reorder-two" size={18} color={isActive ? C.water : C.muted + '77'} />
         </View>
       </View>
       <Card style={isActive ? styles.activeCardGlow : undefined}>
         <View style={{ padding: 14 }}>
-          {/* Today: three habit tiles, tap one to see how it's tracked */}
+          {/* Today: each habit with a battery in its own colour that charges as you get there */}
           <View style={styles.habitHead}>
             <Text style={[styles.intakeLbl, { color: C.muted }]}>TODAY</Text>
-            <Text style={[styles.habitCount, { color: habitsDone === habits.length ? C.green : C.textSub }]}>
+            <Text style={[styles.habitCount, { color: habitsDone === habits.length ? C.accent : C.textSub }]}>
               {habitsDone} of {habits.length} done
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {habits.map(h => (
-              <TouchableOpacity key={h.label} activeOpacity={0.8}
-                style={[styles.habitTile, { backgroundColor: h.done ? C.green + '18' : C.bg, borderColor: h.done ? C.green + '66' : C.border }]}
-                onPress={() => showAlert(h.done ? `${h.label} done` : `${h.label} pending`, h.info)}>
-                <View style={[styles.habitTileIcon, { backgroundColor: h.done ? C.green : C.border + '80' }]}>
-                  <Ionicons name={(h.done ? 'checkmark' : h.icon) as any} size={16} color={h.done ? '#fff' : C.muted} />
-                </View>
-                <Text style={[styles.habitTileLbl, { color: h.done ? C.text : C.muted }]}>{h.label}</Text>
-                <Text style={[styles.habitTileState, { color: h.done ? C.green : C.muted }]}>{h.done ? 'Done' : 'Pending'}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* This week: days hit out of the days so far */}
-          <View style={[styles.habitHead, { marginTop: 16 }]}>
-            <Text style={[styles.intakeLbl, { color: C.muted }]}>THIS WEEK</Text>
-            <Text style={[styles.habitCount, { color: C.muted }]}>Day {weekly?.daysElapsed ?? 1} of 7</Text>
-          </View>
-          {[
-            { label: 'Workouts', icon: 'barbell', color: C.purple, n: weekly?.workouts || 0 },
-            { label: 'Water goal', icon: 'water', color: C.water, n: weekly?.waterSuccess || 0 },
-            { label: 'Protein goal', icon: 'restaurant', color: C.protein, n: weekly?.proteinSuccess || 0 },
-          ].map(s => {
-            const days = weekly?.daysElapsed || 1;
-            return (
-              <View key={s.label} style={styles.weekRow}>
-                <Ionicons name={s.icon as any} size={14} color={s.color} style={{ width: 18 }} />
-                <Text style={[styles.weekRowLbl, { color: C.text }]}>{s.label}</Text>
-                <View style={[styles.weekTrack, { backgroundColor: s.color + '22' }]}>
-                  <View style={[styles.waterFill, { width: `${Math.min(100, Math.round((s.n / days) * 100))}%`, backgroundColor: s.color }]} />
-                </View>
-                <Text style={[styles.weekRowNum, { color: s.color }]}>{s.n}<Text style={{ color: C.muted, fontWeight: '600' }}>/{days}</Text></Text>
+          {habits.map((h, i) => (
+            <TouchableOpacity key={h.label} activeOpacity={0.8} onPress={h.onPress}
+              style={[styles.habitRow, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+              <View style={[styles.habitRowIcon, { backgroundColor: h.color + '1F' }]}>
+                <Ionicons name={(h.done ? 'checkmark' : h.icon) as any} size={17} color={h.color} />
               </View>
-            );
-          })}
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.habitRowLbl, { color: C.text }]}>{h.label}</Text>
+                <Text style={[styles.habitRowSub, { color: h.done ? h.color : C.textSub }]} numberOfLines={1}>{h.detail}</Text>
+              </View>
+              <Text style={[styles.habitPct, { color: h.done ? h.color : C.textSub }]}>{Math.round(Math.min(1, h.pct) * 100)}%</Text>
+              <BatteryMeter pct={h.pct} color={h.color} />
+            </TouchableOpacity>
+          ))}
         </View>
       </Card>
     </View>
@@ -577,9 +513,7 @@ export default function DashboardScreen() {
 
   /** Header bell: bring the Reminders widget into view and briefly highlight it. */
   const scrollToReminders = () => {
-    const index = sections.indexOf('reminders');
-    if (index < 0) return;
-    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 });
+    boardRef.current?.scrollToKey('reminders', 0.1);
     setFlashReminders(true);
     setTimeout(() => setFlashReminders(false), 1400);
   };
@@ -625,7 +559,7 @@ export default function DashboardScreen() {
         <View style={{ padding: 14 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={[styles.libIcon, { backgroundColor: C.accent + '1F' }]}>
-              <Ionicons name="book-outline" size={20} color={C.accent} />
+              <BookIcon size={26} color={C.accent} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.libTitle, { color: C.text }]}>{EXERCISE_CATALOG.length} exercises with guides</Text>
@@ -633,7 +567,7 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          <Text style={[styles.libKicker, { color: C.muted }]}>TODAY'S PICKS · TAP FOR THE GUIDE</Text>
+          <Text style={[styles.libKicker, { color: C.muted }]}>NEW PICKS EVERY TIME YOU OPEN · TAP FOR THE GUIDE</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {picks.map(ex => {
               const mc = C.mg[ex.group] || C.accent;
@@ -666,18 +600,22 @@ export default function DashboardScreen() {
   );
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Render Draggable Item
+  // Widgets on the board
   // ─────────────────────────────────────────────────────────────────────────
-  const renderItem = ({ item, drag, isActive }: RenderItemParams<HomeSectionKey>) => (
-    <DragWidget drag={drag} isActive={isActive}>
-      {item === 'workout' && renderWorkoutSection(isActive)}
-      {item === 'overview' && renderOverviewSection(isActive)}
-      {item === 'intake' && renderIntakeSection(isActive)}
-      {item === 'week_habits' && renderWeekHabitsSection(isActive)}
-      {item === 'reminders' && renderRemindersSection(isActive)}
-      {item === 'library' && renderLibrarySection(isActive)}
-    </DragWidget>
-  );
+  const renderItem = (item: HomeSectionKey, isActive: boolean) => {
+    switch (item) {
+      case 'workout': return renderWorkoutSection(isActive);
+      case 'overview': return renderOverviewSection(isActive);
+      case 'week_habits': return renderWeekHabitsSection(isActive);
+      case 'reminders': return renderRemindersSection(isActive);
+      case 'library': return renderLibrarySection(isActive);
+    }
+  };
+
+  const widgetColor: Record<HomeSectionKey, string> = {
+    workout: C.purple, overview: '#FF6B35', week_habits: C.water, reminders: C.orange, library: C.accent,
+  };
+  const labelFor = (k: HomeSectionKey): WidgetLabel => ({ ...WIDGET_INFO[k], color: widgetColor[k] });
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -695,50 +633,37 @@ export default function DashboardScreen() {
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {/* Reminders bell — full colour when notifications are on, toned down when off */}
-          <TouchableOpacity
-            style={[styles.editHeaderBtn, !remindersOn && { opacity: 0.45 }]}
+          {/* Reminders bell — rings when tapped; full colour when notifications are on, toned down when off */}
+          <HeaderIconButton
+            icon={remindersOn ? 'notifications' : 'notifications-outline'}
+            motion="ring"
+            label="Reminders"
+            color={remindersOn ? C.accent : C.muted}
+            style={!remindersOn && { opacity: 0.45 }}
             onPress={scrollToReminders}
-            activeOpacity={0.75}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name={remindersOn ? 'notifications' : 'notifications-outline'} size={18}
-              color={remindersOn ? C.accent : C.muted} />
-          </TouchableOpacity>
+          />
 
-          {/* Analytics (no longer a tab) */}
-          <TouchableOpacity
-            style={styles.editHeaderBtn}
+          {/* Analytics (no longer a tab) — its bars grow when tapped */}
+          <HeaderIconButton
+            icon="stats-chart-outline"
+            motion="bars"
+            label="Analytics"
             onPress={() => router.navigate({ pathname: '/analytics', params: { from: '/' } } as any)}
-            activeOpacity={0.75}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityLabel="Analytics"
-          >
-            <Ionicons name="stats-chart-outline" size={18} color={C.accent} />
-          </TouchableOpacity>
+          />
 
           <SettingsButton />
         </View>
       </View>
 
-      {/* ── Interactive Draggable FlatList ── */}
-      <DraggableFlatList
-        ref={listRef}
-        onScrollToIndexFailed={({ index, averageItemLength }) => {
-          // Rows have varying heights; jump close, then retry precisely
-          listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: true });
-          setTimeout(() => listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.1 }), 250);
-        }}
+      {/* ── Widgets: hold one to move it ── */}
+      <DragBoard
+        ref={boardRef}
         data={sections}
-        extraData={sections}
-        onDragEnd={handleDragEnd}
-        keyExtractor={(item) => item}
+        onReorder={handleDragEnd}
         renderItem={renderItem}
-        {...DRAG_LIST_PROPS}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        ListFooterComponent={
+        labelFor={labelFor}
+        onRefresh={onRefresh}
+        footer={
           <TouchableOpacity style={[styles.customizeBtn, { borderColor: C.border }]} onPress={() => setEditModal(true)} activeOpacity={0.75}>
             <Ionicons name="apps-outline" size={16} color={C.accent} />
             <Text style={[styles.customizeTxt, { color: C.accent }]}>Customize widgets</Text>
@@ -813,29 +738,13 @@ export default function DashboardScreen() {
             {/* Current widget order — tap arrows to reorder */}
             <View style={styles.glassWidgetList}>
               {sections.map((key, idx) => {
-                const labels: Record<string, string> = {
-                  workout: "Today's Workout",
-                  overview: 'Overview',
-                  intake: 'Intake Goals',
-                  week_habits: 'This Week & Habits',
-                  reminders: 'Reminders',
-                  library: 'Exercise Library',
-                };
-                const icons: Record<string, any> = {
-                  workout: 'barbell-outline',
-                  overview: 'grid-outline',
-                  intake: 'nutrition-outline',
-                  week_habits: 'calendar-outline',
-                  reminders: 'notifications-outline',
-                  library: 'book-outline',
-                };
                 return (
                   <View key={key} style={[styles.glassWidgetRow, { borderColor: C.border }]}>
                     <View style={[styles.glassWidgetNum, { backgroundColor: C.accent + '18' }]}>
                       <Text style={[styles.glassWidgetNumTxt, { color: C.accent }]}>{idx + 1}</Text>
                     </View>
-                    <Ionicons name={icons[key]} size={16} color={C.muted} style={{ marginHorizontal: 8 }} />
-                    <Text style={[styles.glassWidgetLabel, { color: C.text }]} numberOfLines={1}>{labels[key]}</Text>
+                    <Ionicons name={WIDGET_INFO[key].icon as any} size={16} color={C.muted} style={{ marginHorizontal: 8 }} />
+                    <Text style={[styles.glassWidgetLabel, { color: C.text }]} numberOfLines={1}>{WIDGET_INFO[key].title}</Text>
 
                     {/* Direct Edit Button */}
                     <TouchableOpacity
@@ -897,8 +806,8 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* ── Quick Goals Edit Modal ── */}
-      <Modal visible={goalModal} transparent animationType="slide" onRequestClose={() => setGoalModal(false)}>
-        <TouchableOpacity style={styles.glassOverlay} activeOpacity={1} onPress={() => setGoalModal(false)}>
+      <Modal visible={goalModal} transparent animationType="slide" onRequestClose={closeGoalsModal}>
+        <TouchableOpacity style={styles.glassOverlay} activeOpacity={1} onPress={closeGoalsModal}>
           <TouchableOpacity activeOpacity={1} style={styles.glassSheet} onPress={e => e.stopPropagation()}>
             <View style={styles.glassHandle} />
 
@@ -912,7 +821,7 @@ export default function DashboardScreen() {
               </View>
               <TouchableOpacity
                 style={[styles.glassCloseBtn, { backgroundColor: C.border + '80' }]}
-                onPress={() => setGoalModal(false)}
+                onPress={closeGoalsModal}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Ionicons name="close" size={16} color={C.text} />
@@ -930,7 +839,7 @@ export default function DashboardScreen() {
                   style={[styles.stepperBtn, { borderColor: C.border }]}
                   onPress={() => {
                     const cur = parseFloat(waterGoalInput) || 3.0;
-                    setWaterGoalInput((Math.max(0.5, cur - 0.25)).toFixed(2));
+                    setGoalInput('water_goal', (Math.max(0.5, cur - 0.25)).toFixed(2));
                   }}
                 >
                   <Ionicons name="remove" size={16} color={C.text} />
@@ -938,7 +847,7 @@ export default function DashboardScreen() {
                 <TextInput
                   style={[styles.targetInput, { color: C.water, borderColor: C.water + '50' }]}
                   value={waterGoalInput}
-                  onChangeText={setWaterGoalInput}
+                  onChangeText={v => setGoalInput('water_goal', v)}
                   keyboardType="decimal-pad"
                   placeholder="3.0"
                   placeholderTextColor={C.muted}
@@ -947,7 +856,7 @@ export default function DashboardScreen() {
                   style={[styles.stepperBtn, { borderColor: C.border }]}
                   onPress={() => {
                     const cur = parseFloat(waterGoalInput) || 3.0;
-                    setWaterGoalInput((cur + 0.25).toFixed(2));
+                    setGoalInput('water_goal', (cur + 0.25).toFixed(2));
                   }}
                 >
                   <Ionicons name="add" size={16} color={C.text} />
@@ -966,7 +875,7 @@ export default function DashboardScreen() {
                   style={[styles.stepperBtn, { borderColor: C.border }]}
                   onPress={() => {
                     const cur = parseFloat(proteinGoalInput) || 120;
-                    setProteinGoalInput(String(Math.max(20, Math.round(cur - 10))));
+                    setGoalInput('protein_goal', String(Math.max(20, Math.round(cur - 10))));
                   }}
                 >
                   <Ionicons name="remove" size={16} color={C.text} />
@@ -974,7 +883,7 @@ export default function DashboardScreen() {
                 <TextInput
                   style={[styles.targetInput, { color: C.protein, borderColor: C.protein + '50' }]}
                   value={proteinGoalInput}
-                  onChangeText={setProteinGoalInput}
+                  onChangeText={v => setGoalInput('protein_goal', v)}
                   keyboardType="numeric"
                   placeholder="120"
                   placeholderTextColor={C.muted}
@@ -983,7 +892,7 @@ export default function DashboardScreen() {
                   style={[styles.stepperBtn, { borderColor: C.border }]}
                   onPress={() => {
                     const cur = parseFloat(proteinGoalInput) || 120;
-                    setProteinGoalInput(String(Math.round(cur + 10)));
+                    setGoalInput('protein_goal', String(Math.round(cur + 10)));
                   }}
                 >
                   <Ionicons name="add" size={16} color={C.text} />
@@ -1002,7 +911,7 @@ export default function DashboardScreen() {
                   style={[styles.stepperBtn, { borderColor: C.border }]}
                   onPress={() => {
                     const cur = parseInt(calorieGoalInput, 10) || 2800;
-                    setCalorieGoalInput(String(Math.max(500, cur - 100)));
+                    setGoalInput('calorie_goal', String(Math.max(500, cur - 100)));
                   }}
                 >
                   <Ionicons name="remove" size={16} color={C.text} />
@@ -1010,7 +919,7 @@ export default function DashboardScreen() {
                 <TextInput
                   style={[styles.targetInput, { color: C.calories, borderColor: C.calories + '50' }]}
                   value={calorieGoalInput}
-                  onChangeText={setCalorieGoalInput}
+                  onChangeText={v => setGoalInput('calorie_goal', v)}
                   keyboardType="numeric"
                   placeholder="2800"
                   placeholderTextColor={C.muted}
@@ -1019,7 +928,7 @@ export default function DashboardScreen() {
                   style={[styles.stepperBtn, { borderColor: C.border }]}
                   onPress={() => {
                     const cur = parseInt(calorieGoalInput, 10) || 2800;
-                    setCalorieGoalInput(String(cur + 100));
+                    setGoalInput('calorie_goal', String(cur + 100));
                   }}
                 >
                   <Ionicons name="add" size={16} color={C.text} />
@@ -1027,18 +936,8 @@ export default function DashboardScreen() {
               </View>
             </View>
 
-            {/* Save Button */}
-            <TouchableOpacity
-              style={[styles.saveTargetsBtn, { backgroundColor: C.accent }]}
-              onPress={handleSaveGoals}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="checkmark-circle" size={18} color="#fff" style={{ marginRight: 6 }} />
-              <Text style={styles.saveTargetsBtnTxt}>Save Goals</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setGoalModal(false)} style={styles.glassDoneBtn}>
-              <Text style={[styles.glassdoneTxt, { color: C.muted }]}>Cancel</Text>
+            <TouchableOpacity onPress={closeGoalsModal} style={styles.glassDoneBtn}>
+              <Text style={[styles.glassdoneTxt, { color: C.text }]}>Done</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -1057,26 +956,6 @@ export default function DashboardScreen() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Subcomponents for the layout
 // ─────────────────────────────────────────────────────────────────────────────
-function OverviewCard({ icon, title, val, sub, color, onPress }: any) {
-  const { C } = useTheme();
-  const styles = makeStyles(C);
-  const Wrapper = onPress ? TouchableOpacity : View;
-  return (
-    <Wrapper style={styles.ovCardWrap} onPress={onPress} activeOpacity={0.82}>
-      <Card accent={color} style={{ marginBottom: 0 }}>
-        <View style={styles.ovCard}>
-          <View style={[styles.ovIconBox, { backgroundColor: color + '15' }]}>
-            <Ionicons name={icon} size={20} color={color} />
-          </View>
-          <Text style={styles.ovTitle} numberOfLines={1}>{title}</Text>
-          <Text style={[styles.ovVal, { color }]} numberOfLines={1}>{val}</Text>
-          <Text style={styles.ovSub} numberOfLines={1}>{sub}</Text>
-        </View>
-      </Card>
-    </Wrapper>
-  );
-}
-
 function MacroProgress({ icon, name, val, pct, color, onPress }: any) {
   const { C } = useTheme();
   const styles = makeStyles(C);
@@ -1172,6 +1051,11 @@ function makeStyles(C: any, isDark?: boolean) {
     // This Week & Habits widget
     habitHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
     habitCount: { fontSize: 12, fontWeight: '800' },
+    habitRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+    habitRowIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    habitRowLbl: { fontSize: 14, fontWeight: '800' },
+    habitRowSub: { fontSize: 11, fontWeight: '800', marginTop: 1 },
+    habitPct: { fontSize: 12, fontWeight: '900', minWidth: 34, textAlign: 'right' },
     habitTile: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 16, borderWidth: 1 },
     habitTileIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
     habitTileLbl: { fontSize: 13, fontWeight: '800' },
@@ -1497,6 +1381,9 @@ function makeStyles(C: any, isDark?: boolean) {
     workoutCardInner: {
       padding: 16,
     },
+    pendingRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+    pendingDot: { width: 7, height: 7, borderRadius: 4 },
+    pendingTxt: { fontSize: 12, fontWeight: '800' },
     workoutTopRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1584,7 +1471,6 @@ function makeStyles(C: any, isDark?: boolean) {
 
     // Habits
     habitsBox: { padding: 16 },
-    habitRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
     habitIconWrap: { width: 20, marginRight: 8, alignItems: 'center' },
     habitLabel: { flex: 1, fontSize: 11, color: C.textSub, fontWeight: '600' },
     habitProgressBox: { marginTop: 8, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },

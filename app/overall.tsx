@@ -5,7 +5,6 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  RefreshControl,
   TouchableOpacity,
   Modal,
   Dimensions,
@@ -20,6 +19,7 @@ import {
   getStreak,
   getWeeklyStats,
   getLatestWeight,
+  getSupplementProgress,
   getSetting,
   setSetting,
   DailyLog,
@@ -29,6 +29,8 @@ import {
 } from '../db/database';
 import { SectionHeader } from '../components/ui';
 import { SettingsButton } from '../components/SettingsButton';
+import { RefreshScrollView } from '../components/PullToRefresh';
+import { SupplementIcon } from '../components/SupplementIcon';
 import { useTheme } from '../contexts/ThemeContext';
 import { logError } from '../utils/logError';
 
@@ -39,7 +41,7 @@ export type MetricId =
   | 'calories'
   | 'water'
   | 'protein'
-  | 'creatine'
+  | 'supplements'
   | 'workout'
   | 'sleep'
   | 'streak'
@@ -84,14 +86,14 @@ export const METRIC_REGISTRY: Record<MetricId, MetricDefinition> = {
     category: 'Nutrition',
     description: 'Muscle building protein target',
   },
-  creatine: {
-    id: 'creatine',
-    label: 'Creatine',
-    icon: 'flash',
-    color: '#F97316',
-    glowColor: '#FB923C',
+  supplements: {
+    id: 'supplements',
+    label: 'Supplements',
+    icon: 'leaf',
+    color: '#14B8A6',
+    glowColor: '#2DD4BF',
     category: 'Habits',
-    description: 'Daily 5g creatine intake dose',
+    description: "Today's supplements ticked off",
   },
   workout: {
     id: 'workout',
@@ -145,7 +147,7 @@ const DEFAULT_METRICS: MetricId[] = ['calories', 'protein', 'water'];
 const PRESETS: { label: string; icon: keyof typeof Ionicons.glyphMap; keys: MetricId[] }[] = [
   { label: 'Nutrition', icon: 'nutrition-outline', keys: ['calories', 'protein', 'water'] },
   { label: 'Athlete', icon: 'barbell-outline', keys: ['workout', 'protein', 'streak'] },
-  { label: 'Habits', icon: 'water-outline', keys: ['water', 'creatine', 'sleep'] },
+  { label: 'Habits', icon: 'water-outline', keys: ['water', 'supplements', 'sleep'] },
   { label: 'Gains', icon: 'flame-outline', keys: ['calories', 'protein', 'workout'] },
 ];
 
@@ -289,25 +291,9 @@ function MetricSvgIcon({ metricId, size = 20, color }: { metricId: MetricId; siz
           <Circle cx={12} cy={12} r={1.5} fill={color} opacity={0.6} />
         </Svg>
       );
-    case 'creatine':
-      // Lightning bolt icon
-      return (
-        <Svg width={s} height={s} viewBox="0 0 24 24" fill="none">
-          <Path
-            d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"
-            fill={color}
-            opacity={0.2}
-          />
-          <Path
-            d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"
-            stroke={color}
-            strokeWidth={1.8}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-          />
-        </Svg>
-      );
+    case 'supplements':
+      // Supplement tub with a leaf
+      return <SupplementIcon size={s} color={color} />;
     case 'workout':
       // Dumbbell icon
       return (
@@ -400,7 +386,7 @@ export default function OverallScreen() {
   const [streak, setStreak] = useState<Streak | null>(null);
   const [weekly, setWeekly] = useState<any>(null);
   const [weight, setWeight] = useState<number | null>(null);
-  const [refresh, setRefresh] = useState(false);
+  const [supplements, setSupplements] = useState({ taken: 0, total: 0 });
   const [customizing, setCustomizing] = useState(false);  // ring setup panel in the rings card
 
   // Selected metrics for the 3 concentric rings
@@ -408,7 +394,8 @@ export default function OverallScreen() {
     try {
       const saved = getSetting('overall_ring_metrics_v2', '');
       if (saved) {
-        const parsed = JSON.parse(saved);
+        // The Supplements ring took over from Creatine
+        const parsed = (JSON.parse(saved) as any[]).map(k => (k === 'creatine' ? 'supplements' : k));
         if (Array.isArray(parsed) && parsed.length === 3) {
           const validKeys = Object.keys(METRIC_REGISTRY);
           if (parsed.every((k: any) => validKeys.includes(k))) {
@@ -428,6 +415,7 @@ export default function OverallScreen() {
     setStreak(getStreak());
     setWeekly(getWeeklyStats());
     setWeight(getLatestWeight());
+    setSupplements(getSupplementProgress());
   }, []);
 
   useFocusEffect(
@@ -435,12 +423,6 @@ export default function OverallScreen() {
       load();
     }, [load])
   );
-
-  const onRefresh = () => {
-    setRefresh(true);
-    load();
-    setRefresh(false);
-  };
 
   const handleSelectMetricForSlot = (metricId: MetricId) => {
     if (pickerSlot === null) return;
@@ -496,8 +478,9 @@ export default function OverallScreen() {
         target = goals.water_goal || 3.0;
         pct = target > 0 ? Math.min(current / target, 1) : 0;
         valueStr = `${current.toFixed(2)} / ${target.toFixed(1)} L`;
-        subText = current >= target ? 'Hydration goal hit' : `${Math.max(0, target - current).toFixed(2)} L remaining`;
-        isDone = current >= target;
+        // Float sums (30 × 0.1 L = 2.9999…) still count as the goal hit
+        isDone = current >= target - 1e-6;
+        subText = isDone ? 'Hydration goal hit' : `${Math.max(0, target - current).toFixed(2)} L remaining`;
         break;
       }
       case 'protein': {
@@ -509,12 +492,13 @@ export default function OverallScreen() {
         isDone = current >= target;
         break;
       }
-      case 'creatine': {
-        const taken = !!log.creatine_taken;
-        pct = taken ? 1 : 0;
-        valueStr = taken ? '5g Taken ✓' : 'Not Logged';
-        subText = taken ? 'Muscle saturation on track' : 'Daily 5g dose recommended';
-        isDone = taken;
+      case 'supplements': {
+        const { taken, total } = supplements;
+        pct = total > 0 ? Math.min(taken / total, 1) : 0;
+        valueStr = total > 0 ? `${taken} / ${total} taken` : 'None added';
+        subText = total === 0 ? 'Add yours in the Tracker'
+          : taken >= total ? 'All taken today' : `${total - taken} still to take`;
+        isDone = total > 0 && taken >= total;
         break;
       }
       case 'workout': {
@@ -529,7 +513,7 @@ export default function OverallScreen() {
         const slept = !!log.slept_well;
         pct = slept ? 1 : 0;
         valueStr = slept ? 'Rested ✓' : 'Pending';
-        subText = slept ? 'Recovery logged' : 'Log rest in tracker';
+        subText = slept ? 'Recovery logged' : 'Tick "Slept well" in Tracker › Daily Habits';
         isDone = slept;
         break;
       }
@@ -608,10 +592,10 @@ export default function OverallScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <RefreshScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
+        onRefresh={load}
       >
         {/* ── Stadium Racetrack Card ── */}
         <View style={styles.trackCard}>
@@ -846,7 +830,7 @@ export default function OverallScreen() {
         ))}
 
         <View style={{ height: 32 }} />
-      </ScrollView>
+      </RefreshScrollView>
 
       {/* ── Metric Picker Modal ── */}
       <Modal

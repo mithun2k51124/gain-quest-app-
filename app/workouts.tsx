@@ -7,14 +7,15 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  RefreshControl,
   Modal,
   LayoutChangeEvent,
   Image,
   Pressable,
 } from 'react-native';
+import Animated, { Easing, FadeInLeft, FadeInRight, ZoomIn, useAnimatedRef, useScrollOffset } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
   getWorkoutPlans,
@@ -48,6 +49,8 @@ import { findExercise } from '../constants/exerciseCatalog';
 import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
 import { WheelPicker } from '../components/WheelPicker';
 import { SettingsButton } from '../components/SettingsButton';
+import { SegmentTabs, SegmentDef } from '../components/SegmentTabs';
+import { PullToRefresh } from '../components/PullToRefresh';
 import { SetSession } from '../components/SetSession';
 import { WorkoutCalendar, longDate } from '../components/WorkoutCalendar';
 import { weightStepsFor } from '../constants/equipment';
@@ -59,6 +62,7 @@ import { useCustomAlert } from '../contexts/AlertContext';
 import { MUSCLE_GROUPS, DAYS, EXERCISE_LIBRARY } from '../constants/theme';
 
 type Tab = 'Planner' | 'Muscles' | 'Log' | 'History';
+const TAB_ORDER: Tab[] = ['Planner', 'Log', 'Muscles', 'History'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Muscle recovery and frequency (Muscles tab)
@@ -69,6 +73,19 @@ function daysAgoStr(n: number): string {
   d.setDate(d.getDate() - n);
   return toDateStr(d);
 }
+/** A real calendar day written YYYY-MM-DD (the Log tab's date box is free text). */
+function isDateStr(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00`);
+  return !isNaN(d.getTime()) && toDateStr(d) === s;
+}
+
+/** One logged set as the Log tab shows it. */
+interface LoggedSet { name: string; muscle: string; sets: number; reps: number; weight: number }
+const loggedOn = (date: string): LoggedSet[] => getExercisesForDate(date).map(l => ({
+  name: l.exercise_name, muscle: l.muscle_group, sets: l.sets, reps: l.reps, weight: l.weight,
+}));
+
 const dayDiff = (from: string, to: string) =>
   Math.round((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / 86400000);
 
@@ -141,12 +158,15 @@ function NeuModal({
 }) {
   const { C } = useTheme();
   const neuStyles = makeNeuStyles(C);
+  // Modals draw under the system bars: keep the sheet's last button above the navigation bar
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       {/* Backdrop behind the sheet, so lists inside the sheet scroll from anywhere */}
       <View style={neuStyles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
-        <View style={[neuStyles.sheet, fullScreen && neuStyles.sheetFull, fit && { maxHeight: '90%' }]}>
+        <View style={[neuStyles.sheet, fullScreen && neuStyles.sheetFull, fit && { maxHeight: '90%' },
+          { paddingBottom: 20 + Math.max(16, insets.bottom) }]}>
           <View style={neuStyles.handle} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text style={neuStyles.sheetTitle}>{title}</Text>
@@ -181,16 +201,20 @@ function FlatOptions({
 }
 
 function GroupedExercisePicker({
-  muscleGroups, onConfirm,
+  muscleGroups, planned, onAdd, onRemove, onDone,
 }: {
   muscleGroups: string[];
-  onConfirm: (selected: { muscle: string; exercise: string }[]) => void;
+  planned: { muscle: string; exercise: string }[];   // already on this day
+  onAdd: (muscle: string, exercise: string) => void;
+  onRemove: (exercise: string) => void;
+  onDone: () => void;
 }) {
   const { C } = useTheme();
   const neuStyles = makeNeuStyles(C);
   const allGroups = muscleGroups.length ? muscleGroups : Object.keys(EXERCISE_LIBRARY);
   const [activeTab, setActiveTab] = useState<string>(allGroups[0] ?? '');
-  const [selected, setSelected] = useState<{ muscle: string; exercise: string }[]>([]);
+  // What's ticked is what's in the plan: every tap changes the day itself, so there's nothing to save
+  const selected = planned;
 
   // Custom exercise creation
   const [showCustom, setShowCustom] = useState(false);
@@ -201,23 +225,20 @@ function GroupedExercisePicker({
     selected.some(s => s.exercise === exercise);
 
   const toggle = (muscle: string, exercise: string) => {
-    setSelected(prev =>
-      prev.some(s => s.exercise === exercise)
-        ? prev.filter(s => s.exercise !== exercise)
-        : [...prev, { muscle, exercise }]
-    );
+    Haptics.selectionAsync().catch(() => {});
+    if (isSelected(exercise)) onRemove(exercise);
+    else onAdd(muscle, exercise);
   };
 
   const removeSelected = (exercise: string) => {
-    setSelected(prev => prev.filter(s => s.exercise !== exercise));
+    Haptics.selectionAsync().catch(() => {});
+    onRemove(exercise);
   };
 
   const addCustomExercise = () => {
     const name = customName.trim();
     if (!name) return;
-    if (!isSelected(name)) {
-      setSelected(prev => [...prev, { muscle: customMuscle, exercise: name }]);
-    }
+    if (!isSelected(name)) onAdd(customMuscle, name);
     setCustomName('');
     setShowCustom(false);
   };
@@ -250,15 +271,16 @@ function GroupedExercisePicker({
             {selected.map(s => {
               const col = C.mg[s.muscle] || C.accent;
               return (
-                <TouchableOpacity
-                  key={s.exercise}
-                  style={[neuStyles.selectedPill, { backgroundColor: col + '28', borderColor: col }]}
-                  onPress={() => removeSelected(s.exercise)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[neuStyles.selectedPillText, { color: col }]}>{s.exercise}</Text>
-                  <Text style={[neuStyles.selectedPillX, { color: col }]}>  ×</Text>
-                </TouchableOpacity>
+                <Animated.View key={s.exercise} entering={ZoomIn.duration(200)}>
+                  <TouchableOpacity
+                    style={[neuStyles.selectedPill, { backgroundColor: col + '28', borderColor: col }]}
+                    onPress={() => removeSelected(s.exercise)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[neuStyles.selectedPillText, { color: col }]}>{s.exercise}</Text>
+                    <Text style={[neuStyles.selectedPillX, { color: col }]}>  ×</Text>
+                  </TouchableOpacity>
+                </Animated.View>
               );
             })}
           </ScrollView>
@@ -408,44 +430,12 @@ function GroupedExercisePicker({
         })}
       </ScrollView>
 
-      {/* ── Confirm button ── */}
-      <TouchableOpacity
-        style={[
-          neuStyles.confirmBtn,
-          { backgroundColor: selected.length > 0 ? C.accent : C.border },
-        ]}
-        onPress={() => {
-          if (selected.length > 0) onConfirm(selected);
-        }}
-        disabled={selected.length === 0}
-        activeOpacity={0.8}
-      >
-        <Text style={[
-          neuStyles.confirmBtnText,
-          { color: selected.length > 0 ? '#fff' : C.muted },
-        ]}>
-          {selected.length === 0
-            ? 'Select exercises above'
-            : `Add ${selected.length} Exercise${selected.length > 1 ? 's' : ''} ✓`}
+      {/* ── Close (everything is already in the plan) ── */}
+      <TouchableOpacity style={[neuStyles.confirmBtn, { backgroundColor: C.accent }]} onPress={onDone} activeOpacity={0.8}>
+        <Text style={[neuStyles.confirmBtnText, { color: '#fff' }]}>
+          {selected.length ? `Done · ${selected.length} exercise${selected.length === 1 ? '' : 's'}` : 'Done'}
         </Text>
       </TouchableOpacity>
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Save Confirmation Toast
-// ─────────────────────────────────────────────────────────────────────────────
-function SaveToast({ visible, day }: { visible: boolean; day: string }) {
-  const { showAlert } = useCustomAlert();
-
-  const { C } = useTheme();
-  const neuStyles = makeNeuStyles(C);
-  if (!visible) return null;
-  return (
-    <View style={neuStyles.toast}>
-      <Text style={neuStyles.toastIcon}>✓</Text>
-      <Text style={neuStyles.toastText}>{day} plan saved!</Text>
     </View>
   );
 }
@@ -477,7 +467,7 @@ function MuscleGroupAccordion({
 }: {
   muscle: string;
   exercises: WorkoutPlanExercise[];
-  loggedSets: any[];
+  loggedSets: LoggedSet[];
   onLog: (exName: string, s: number, r: number, w: number) => void;
   onDelete: (id: number) => void;
   expandAll?: boolean;
@@ -664,7 +654,7 @@ function ExerciseLogCard({
 }: {
   ex: WorkoutPlanExercise;
   onLog: (s: number, r: number, w: number) => void;
-  loggedSets: ExerciseLog[];
+  loggedSets: LoggedSet[];
   onDelete?: () => void;
 }) {
   const { C } = useTheme();
@@ -911,26 +901,44 @@ export default function WorkoutsScreen() {
 
   const { C, isDark } = useTheme();
   const styles = makeStyles(C);
-  const { openTab, scrollToDay } = useLocalSearchParams<{ openTab?: string; scrollToDay?: string }>();
-  const [tab, setTab] = useState<Tab>((openTab as Tab) || 'Planner');
+  const { openTab, scrollToDay, openSplit } = useLocalSearchParams<{ openTab?: string; scrollToDay?: string; openSplit?: string }>();
+  const [tab, setTabState] = useState<Tab>((openTab as Tab) || 'Planner');
+  const tabRef = useRef(tab);
+  // Which way the last switch went, so the new section slides in from that side
+  const [tabDir, setTabDir] = useState<1 | -1>(1);
+  const setTab = useCallback((next: Tab) => {
+    const prev = tabRef.current;
+    if (prev === next) return;
+    tabRef.current = next;
+    setTabDir(TAB_ORDER.indexOf(next) > TAB_ORDER.indexOf(prev) ? 1 : -1);
+    setTabState(next);
+  }, []);
   // Keep tab in sync when screen re-focuses with a different openTab param
   useEffect(() => {
-    if (openTab && ['Planner', 'Log', 'Muscles', 'History'].includes(openTab)) {
+    if (openTab && TAB_ORDER.includes(openTab as Tab)) {
       setTab(openTab as Tab);
     }
-  }, [openTab]);
+  }, [openTab, openSplit, setTab]);
   const [plans, setPlans] = useState<WorkoutPlan[]>([]);
   const [planExercises, setPlanExercises] = useState<WorkoutPlanExercise[]>([]);
   const [muscles, setMuscles] = useState<MuscleEntry[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [histDate, setHistDate] = useState<string | null>(null);  // History day; null = latest workout
   const [recentLogs, setRecentLogs] = useState<ExerciseLog[]>([]);  // last 4 weeks, for the Muscles tab
-  const [refresh, setRefresh] = useState(false);
 
   const [sessionId, setSessionId] = useState<number | null>(null);
-  const [sessionDate, setSessionDate] = useState(todayStr());
+  const [sessionDate, setSessionDateState] = useState(todayStr());
   const [sessionNotes, setSessionNotes] = useState('');
-  const [exercises, setExercises] = useState<any[]>([]);
+  // Sets logged on the session's date, read from the database: they're still there after a restart
+  const [exercises, setExercises] = useState<LoggedSet[]>([]);
+  const sessionDateRef = useRef(sessionDate);
+  const dateTyped = useRef(false);   // a date typed in stays; otherwise the log follows today
+  const setSessionDate = (d: string, typed: boolean) => {
+    if (typed) dateTyped.current = true;
+    sessionDateRef.current = d;
+    setSessionDateState(d);
+    if (isDateStr(d)) setExercises(loggedOn(d));
+  };
   const [sessionMGs, setSessionMGs] = useState<string[]>([]);
   const [todaysExercises, setTodaysExercises] = useState<WorkoutPlanExercise[]>([]);
 
@@ -946,9 +954,6 @@ export default function WorkoutsScreen() {
 
   const [prData, setPrData] = useState<any | null>(null);
 
-  // Saved toast state
-  const [savedDay, setSavedDay] = useState<string | null>(null);
-
   // View All state for Log tab accordion
   const [viewAll, setViewAll] = useState(false);
 
@@ -961,6 +966,23 @@ export default function WorkoutsScreen() {
     
     const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
     setTodaysExercises(getWorkoutPlanExercises(dayName));
+
+    // The screen stays open across midnight: the next morning's sets belong to the new day
+    let date = sessionDateRef.current;
+    if (!dateTyped.current && date !== todayStr()) {
+      date = todayStr();
+      sessionDateRef.current = date;
+      setSessionDateState(date);
+      setSessionId(null);
+    }
+    if (isDateStr(date)) setExercises(loggedOn(date));
+  }, []);
+
+  // Just the plan, for edits that save as they're made (each tap in the exercise picker): no full reload
+  const loadPlan = useCallback(() => {
+    setPlans(getWorkoutPlans());
+    setPlanExercises(getWorkoutPlanExercises());
+    setTodaysExercises(getWorkoutPlanExercises(new Date().toLocaleDateString('en-US', { weekday: 'long' })));
   }, []);
 
   useFocusEffect(
@@ -969,8 +991,9 @@ export default function WorkoutsScreen() {
     }, [load])
   );
 
-  // Planner day scroll ref
-  const plannerScrollRef = useRef<any>(null);
+  // Planner day scroll ref; its offset (read on the UI thread) tells pull-to-refresh we're at the top
+  const plannerScrollRef = useAnimatedRef<any>();
+  const scrollY = useScrollOffset(plannerScrollRef);
   const dayOffsets = useRef<Record<string, number>>({});
 
   // When scrollToDay changes (edit button from home), switch to Planner and scroll
@@ -985,25 +1008,29 @@ export default function WorkoutsScreen() {
     }
   }, [scrollToDay, tab]);
 
-  const onRefresh = () => {
-    setRefresh(true);
-    load();
-    setRefresh(false);
-  };
-  const tabs: Tab[] = ['Planner', 'Log', 'Muscles', 'History'];
+  // Each section has its own colour, like the tabs in the bottom bar
+  const tabs: SegmentDef<Tab>[] = [
+    { key: 'Planner', label: 'Planner', icon: 'calendar-outline', activeIcon: 'calendar', color: C.accent },
+    { key: 'Log', label: 'Log', icon: 'barbell-outline', activeIcon: 'barbell', color: C.purple },
+    { key: 'Muscles', label: 'Muscles', icon: 'body-outline', activeIcon: 'body', color: C.orange },
+    { key: 'History', label: 'History', icon: 'time-outline', activeIcon: 'time', color: C.red },
+  ];
 
   const addExerciseSet = (exName: string, exMuscle: string, s: number, r: number, w: number) => {
+    // The date box is free text: only a real day, today or earlier, gets sets
+    if (!isDateStr(sessionDate) || sessionDate > todayStr()) {
+      showAlert('Check the date', 'Use a date like 2026-10-20, today or earlier.');
+      return;
+    }
     let currentSessionId = sessionId;
-    
+
     if (!currentSessionId) {
       const mgs = Array.from(new Set(todaysExercises.map(e => e.muscle_group))).join(', ');
       currentSessionId = createWorkoutSession(sessionDate, mgs || 'Mixed', sessionNotes);
       setSessionId(currentSessionId);
-
-      if (sessionDate === todayStr()) {
-        updateDailyLog(todayStr(), { workout_completed: 1 });
-        updateStreak();
-      }
+      // Any day with a logged set is a training day, a past one included (streaks, History)
+      updateDailyLog(sessionDate, { workout_completed: 1 });
+      updateStreak();
     }
 
     const { isNewPR, oldPR, new1RM } = checkPRForLog(exName, s, r, w);
@@ -1011,11 +1038,8 @@ export default function WorkoutsScreen() {
     logExercise(currentSessionId, sessionDate, exName, exMuscle, s, r, w);
     setRecentLogs(getExerciseLogsSince(daysAgoStr(27)));
     setMuscles(getMuscleTracker());
-
-    setExercises(prev => [
-      ...prev,
-      { name: exName, muscle: exMuscle, sets: s, reps: r, weight: w },
-    ]);
+    setSessions(getWorkoutSessions(-1));   // History shows it straight away
+    setExercises(loggedOn(sessionDate));
 
     if (isNewPR) {
       setPrData({ exercise: exName, oldPR, new1RM, weight: w, reps: r });
@@ -1027,10 +1051,10 @@ export default function WorkoutsScreen() {
       showAlert('Add at least one exercise.');
       return;
     }
-
-    showAlert('Session Complete!', `${exercises.length} exercises logged.`);
+    const names = new Set(exercises.map(e => e.name)).size;
+    showAlert('Session Complete!', `${names} exercise${names === 1 ? '' : 's'}, ${exercises.length} set${exercises.length === 1 ? '' : 's'} logged.`);
+    // The sets stay ticked off; only the session ends
     setSessionId(null);
-    setExercises([]);
     setSessionMGs([]);
     load();
   };
@@ -1049,40 +1073,35 @@ export default function WorkoutsScreen() {
       </View>
 
       <View style={styles.tabBar}>
-        {tabs.map(t => (
-          <TouchableOpacity
-            key={t}
-            style={[styles.tabBtn, tab === t && styles.tabActive]}
-            onPress={() => setTab(t)}
-          >
-            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>{t}</Text>
-          </TouchableOpacity>
-        ))}
+        <SegmentTabs tabs={tabs} active={tab} onChange={setTab} />
       </View>
 
+      <PullToRefresh onRefresh={load} scrollY={scrollY}>
       <NestableScrollContainer
         ref={plannerScrollRef}
         contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
+        overScrollMode="never"
       >
+        {/* The section slides in from the side it was picked on */}
+        <Animated.View key={tab} entering={(tabDir > 0 ? FadeInRight : FadeInLeft).duration(280).easing(Easing.out(Easing.cubic))}>
         {tab === 'Planner' && (
           <PlannerTab
             plans={plans}
             planExercises={planExercises}
             dayOffsets={dayOffsets}
+            openSplitNonce={openSplit}
             onSave={(day, name, mgs) => {
+              // Saved as it's edited: no button, no message
               updateWorkoutPlan(day, name, mgs);
-              load();
-              setSavedDay(day);
-              setTimeout(() => setSavedDay(null), 2000);
+              loadPlan();
             }}
             onAddExercise={(day, exercise, muscle) => {
               addWorkoutPlanExercise(day, exercise, muscle);
-              load();
+              loadPlan();
             }}
             onDeleteExercise={id => {
               deleteWorkoutPlanExercise(id);
-              load();
+              loadPlan();
             }}
             onPlanReplaced={load}
             onStartWorkout={() => setTab('Log')}
@@ -1228,7 +1247,7 @@ export default function WorkoutsScreen() {
                       <TextInput
                         style={styles.input}
                         value={sessionDate}
-                        onChangeText={setSessionDate}
+                        onChangeText={d => setSessionDate(d, true)}
                         placeholder="YYYY-MM-DD"
                         placeholderTextColor={C.muted}
                       />
@@ -1434,11 +1453,10 @@ export default function WorkoutsScreen() {
             </>
           );
         })()}
+        </Animated.View>
 
       </NestableScrollContainer>
-
-      {/* ── Save Toast ── */}
-      <SaveToast visible={!!savedDay} day={savedDay || ''} />
+      </PullToRefresh>
 
       {/* ── Muscle Group Picker (Log tab) ── */}
       <NeuModal visible={muscleModal} title="Select Muscle Group" onClose={() => setMuscleModal(false)}>
@@ -1546,6 +1564,7 @@ function PlannerTab({
   onDeleteExercise,
   onPlanReplaced,
   onStartWorkout,
+  openSplitNonce,
 }: {
   plans: WorkoutPlan[];
   planExercises: WorkoutPlanExercise[];
@@ -1555,6 +1574,7 @@ function PlannerTab({
   onDeleteExercise: (id: number) => void;
   onPlanReplaced: () => void;
   onStartWorkout: () => void;
+  openSplitNonce?: string;
 }) {
   const { C } = useTheme();
   const styles = makeStyles(C);
@@ -1568,6 +1588,12 @@ function PlannerTab({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'setup' | 'next'>('setup');
   const [splitConfig, setSplitConfig] = useState(() => getSplitConfig());
+  // Re-read with the plan: a reset (or a split built elsewhere) shows up without reopening the tab
+  useEffect(() => { setSplitConfig(getSplitConfig()); }, [plans]);
+  // Home's "Build your split" opens the builder straight away
+  useEffect(() => {
+    if (openSplitNonce) { setWizardMode('setup'); setWizardOpen(true); }
+  }, [openSplitNonce]);
 
   const getEdit = (day: string) =>
     edits[day] || {
@@ -1575,9 +1601,28 @@ function PlannerTab({
       mgs: (planMap[day]?.muscle_groups || '').split(',').filter(Boolean),
     };
 
+  // Edits save themselves: muscle groups straight away, the name once typing pauses
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const waiting = useRef<Record<string, { name: string; mgs: string[] }>>({});
+  const flushSave = (day: string) => {
+    clearTimeout(saveTimers.current[day]);
+    const e = waiting.current[day];
+    if (!e) return;
+    delete waiting.current[day];
+    onSaveRef.current(day, e.name, e.mgs.join(','));
+  };
+  // Leaving the planner saves whatever is still waiting
+  useEffect(() => () => { Object.keys(waiting.current).forEach(flushSave); }, []);
+
   const updateEdit = (day: string, field: 'name' | 'mgs', val: any) => {
-    const cur = getEdit(day);
-    setEdits(prev => ({ ...prev, [day]: { ...cur, [field]: val } }));
+    const next = { ...getEdit(day), [field]: val };
+    setEdits(prev => ({ ...prev, [day]: next }));
+    waiting.current[day] = next;
+    clearTimeout(saveTimers.current[day]);
+    if (field === 'name') saveTimers.current[day] = setTimeout(() => flushSave(day), 600);
+    else flushSave(day);
   };
 
   const togglePlanMG = (day: string, mg: string) => {
@@ -1607,7 +1652,9 @@ function PlannerTab({
     const exercisesForDay = planExercises.filter(ex => ex.day_of_week === day);
     const expanded = expandedDays.has(day);
     const groups = edit.mgs.filter(mg => mg !== 'Rest');
-    const isRest = edit.mgs.includes('Rest') || (!groups.length && !exercisesForDay.length);
+    // A day is only a rest day when the user says so; otherwise an empty day is just not planned yet
+    const isRest = edit.mgs.includes('Rest') && !exercisesForDay.length;
+    const isEmpty = !isRest && !groups.length && !exercisesForDay.length && !edit.name.trim();
 
     return (
       <View
@@ -1630,10 +1677,12 @@ function PlannerTab({
             <Text style={ps.sub} numberOfLines={1}>
               {isRest
                 ? 'Rest day'
-                : `${edit.name || 'Workout'} · ${exercisesForDay.length} exercise${exercisesForDay.length === 1 ? '' : 's'}`}
+                : isEmpty
+                  ? 'Nothing planned · tap to add exercises'
+                  : `${edit.name || 'Workout'} · ${exercisesForDay.length} exercise${exercisesForDay.length === 1 ? '' : 's'}`}
             </Text>
           </View>
-          {!isRest && (
+          {!isRest && !isEmpty && (
             <View style={ps.dots}>
               {groups.slice(0, 4).map(mg => (
                 <View key={mg} style={[ps.dot, { backgroundColor: C.mg[mg] || C.accent }]} />
@@ -1657,6 +1706,7 @@ function PlannerTab({
               style={styles.input}
               value={edit.name}
               onChangeText={v => updateEdit(day, 'name', v)}
+              onBlur={() => flushSave(day)}
               placeholder="Plan name"
               placeholderTextColor={C.muted}
             />
@@ -1710,12 +1760,8 @@ function PlannerTab({
               </View>
             )}
 
-            <View style={styles.btnRow}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Btn label="+ Exercise" color={C.green} small onPress={() => setExerciseDay(day)} />
-              </View>
-              <Btn label="Save" color={C.accent} small onPress={() => onSave(day, edit.name, edit.mgs.join(','))} />
-            </View>
+            <Btn label={exercisesForDay.length ? 'Add or remove exercises' : 'Add exercises'} icon="add-circle-outline"
+              color={C.accent} small onPress={() => setExerciseDay(day)} />
           </View>
         )}
       </View>
@@ -1738,22 +1784,21 @@ function PlannerTab({
       <SectionHeader title="This Week" />
       {DAYS.filter(d => d !== today).map(renderDay)}
 
-      {/* ── Grouped Exercise Picker for Weekly Plan — Multi-select ── */}
+      {/* ── Exercise picker for a day: each tap adds or removes it from the plan right away ── */}
       <NeuModal
         visible={!!exerciseDay}
-        title={`Add Exercises${exerciseDay ? ` — ${exerciseDay}` : ''}`}
+        title={exerciseDay ? `${exerciseDay}'s exercises` : 'Exercises'}
         onClose={() => setExerciseDay(null)}
         fullScreen
       >
         <GroupedExercisePicker
           muscleGroups={musclesForPicker}
-          onConfirm={(selections) => {
-            if (!exerciseDay) return;
-            selections.forEach(({ muscle, exercise }) => {
-              onAddExercise(exerciseDay, exercise, muscle);
-            });
-            setExerciseDay(null);
-          }}
+          planned={planExercises.filter(e => e.day_of_week === exerciseDay).map(e => ({ muscle: e.muscle_group, exercise: e.exercise_name }))}
+          onAdd={(muscle, exercise) => { if (exerciseDay) onAddExercise(exerciseDay, exercise, muscle); }}
+          onRemove={exercise => planExercises
+            .filter(e => e.day_of_week === exerciseDay && e.exercise_name === exercise)
+            .forEach(e => onDeleteExercise(e.id))}
+          onDone={() => setExerciseDay(null)}
         />
       </NeuModal>
 
@@ -1802,16 +1847,7 @@ function makeStyles(C: any) { return StyleSheet.create({
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: C.bg,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
-  tabBtn: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: C.accent },
-  tabText: { fontSize: 12, color: C.muted, fontWeight: '600' },
-  tabTextActive: { color: C.accent },
+  tabBar: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 2, backgroundColor: C.bg },
   scroll: { padding: 16, paddingBottom: 40 },
   section: { padding: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: C.text, marginBottom: 12 },
@@ -2371,23 +2407,4 @@ function makeNeuStyles(C: any) { return StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
   },
-  // Save toast
-  toast: {
-    position: 'absolute',
-    bottom: 80,
-    alignSelf: 'center',
-    backgroundColor: C.green,
-    borderRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#BFC8D6',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  toastIcon: { fontSize: 16, color: '#fff', fontWeight: '900' },
-  toastText: { fontSize: 14, color: '#fff', fontWeight: '700' },
 }); }

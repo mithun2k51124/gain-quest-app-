@@ -4,8 +4,8 @@
 import type * as NotificationsModule from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
 import {
-  getReminders, getSetting, setSetting, getTodayLog, getGoals, getWorkoutPlans,
-  Reminder, ReminderKind, DailyLog, Goals, WorkoutPlan,
+  getReminders, getSetting, setSetting, getTodayLog, getGoals, getWorkoutPlans, getSupplements,
+  getSupplementsTaken, reachedGoal, Reminder, ReminderKind, DailyLog, Goals, WorkoutPlan, Supplement,
 } from '../db/database';
 import { logError } from './logError';
 
@@ -25,12 +25,15 @@ const DAYS_AHEAD = 7;
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export const REMINDER_KINDS: Record<ReminderKind, { label: string; icon: string; colorKey: string }> = {
-  water:    { label: 'Drink water',   icon: 'water',      colorKey: 'water' },
-  protein:  { label: 'Protein check', icon: 'restaurant', colorKey: 'protein' },
-  creatine: { label: 'Take creatine', icon: 'flash',      colorKey: 'orange' },
-  workout:  { label: 'Workout time',  icon: 'barbell',    colorKey: 'purple' },
-  custom:   { label: 'Reminder',      icon: 'notifications', colorKey: 'accent' },
+  water:      { label: 'Drink water',     icon: 'water',      colorKey: 'water' },
+  protein:    { label: 'Protein check',   icon: 'restaurant', colorKey: 'protein' },
+  supplement: { label: 'Take supplement', icon: 'leaf',       colorKey: 'teal' },
+  workout:    { label: 'Workout time',    icon: 'barbell',    colorKey: 'purple' },
+  custom:     { label: 'Reminder',        icon: 'notifications', colorKey: 'accent' },
 };
+
+/** Label of a supplement's reminders: 'Take Vitamin D'. */
+export const supplementReminderLabel = (name: string) => `Take ${name}`;
 
 export function remindersEnabled(): boolean {
   return notificationsAvailable && getSetting('reminders_enabled', 'false') === 'true';
@@ -39,14 +42,19 @@ export function remindersEnabled(): boolean {
 export const REMINDERS_UNAVAILABLE_MSG =
   'Reminder notifications need the installed GainQuest app — they can\'t run inside Expo Go.';
 
-/** Whether today's goal behind this reminder is already done (so it's skipped). */
-export function isReminderDone(kind: ReminderKind, log: DailyLog, goals: Goals): boolean {
-  switch (kind) {
-    case 'water':    return goals.water_goal > 0 && log.water_intake >= goals.water_goal;
-    case 'protein':  return goals.protein_goal > 0 && log.protein_intake >= goals.protein_goal;
-    case 'creatine': return !!log.creatine_taken;
-    case 'workout':  return !!log.workout_completed;
-    default:         return false;
+/**
+ * Whether today's goal behind this reminder is already done (so it's skipped).
+ * `taken` = today's supplement log (getSupplementsTaken), for supplement reminders.
+ */
+export function isReminderDone(
+  r: Pick<Reminder, 'kind' | 'ref_id'>, log: DailyLog, goals: Goals, taken: Record<number, string> = {}
+): boolean {
+  switch (r.kind) {
+    case 'water':      return reachedGoal(log.water_intake, goals.water_goal);
+    case 'protein':    return reachedGoal(log.protein_intake, goals.protein_goal);
+    case 'supplement': return r.ref_id != null && !!taken[r.ref_id];
+    case 'workout':    return !!log.workout_completed;
+    default:           return false;
   }
 }
 
@@ -56,9 +64,10 @@ function planFor(plans: WorkoutPlan[], weekday: number): WorkoutPlan | undefined
 
 /** Notification text, or null when this reminder shouldn't fire that day. */
 function contentFor(
-  r: Reminder, weekday: number, today: DailyLog | null, goals: Goals, plans: WorkoutPlan[]
+  r: Reminder, weekday: number, today: DailyLog | null, goals: Goals, plans: WorkoutPlan[],
+  supplements: Map<number, Supplement>, taken: Record<number, string>
 ): { title: string; body: string } | null {
-  if (today && isReminderDone(r.kind, today, goals)) return null;
+  if (today && isReminderDone(r, today, goals, taken)) return null;
   switch (r.kind) {
     case 'water': {
       const g = goals.water_goal;
@@ -70,8 +79,12 @@ function contentFor(
       if (today && g > 0) return { title: r.label, body: `${Math.round(today.protein_intake)} of ${g} g protein today.` };
       return { title: r.label, body: g > 0 ? `${g} g protein goal today.` : 'Get some protein in.' };
     }
-    case 'creatine':
-      return { title: r.label, body: `Your ${goals.creatine_dose || 5} g dose for today.` };
+    case 'supplement': {
+      // A reminder left behind by a deleted supplement never fires
+      const s = r.ref_id != null ? supplements.get(r.ref_id) : undefined;
+      if (!s) return null;
+      return { title: supplementReminderLabel(s.name), body: s.dose ? `${s.dose} · tap to tick it off.` : 'Tap to tick it off.' };
+    }
     case 'workout': {
       const plan = planFor(plans, weekday);
       if (!plan || plan.muscle_groups === 'Rest') return null;
@@ -94,6 +107,8 @@ async function doReschedule(): Promise<void> {
   const goals = getGoals();
   const plans = getWorkoutPlans();
   const todayLog = getTodayLog();
+  const supplements = new Map(getSupplements().map(s => [s.id, s]));
+  const takenToday = getSupplementsTaken();
   const now = Date.now();
 
   for (let d = 0; d < DAYS_AHEAD; d++) {
@@ -104,7 +119,7 @@ async function doReschedule(): Promise<void> {
       if (!r.days.includes(String(weekday))) continue;
       const fire = new Date(day.getFullYear(), day.getMonth(), day.getDate(), r.hour, r.minute, 0);
       if (fire.getTime() <= now + 30_000) continue;
-      const content = contentFor(r, weekday, d === 0 ? todayLog : null, goals, plans);
+      const content = contentFor(r, weekday, d === 0 ? todayLog : null, goals, plans, supplements, takenToday);
       if (!content) continue;
       await Notifications.scheduleNotificationAsync({
         content: { ...content, color: ACCENT, data: { kind: r.kind } },
@@ -179,7 +194,7 @@ export function initReminders(): void {
     }).catch(e => logError('reminderChannel', e));
   }
   rescheduleReminders();
-  // Progress changes while the app is open (water logged, creatine taken...) — refresh on leave/return
+  // Progress changes while the app is open (water logged, supplement taken...) — refresh on leave/return
   AppState.addEventListener('change', s => {
     if (s === 'background' || s === 'active') rescheduleReminders();
   });

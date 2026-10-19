@@ -5,37 +5,37 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  RefreshControl,
-  Vibration,
 } from 'react-native';
 
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Modal } from 'react-native';
-import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import * as Haptics from 'expo-haptics';
 import {
   getTodayLog,
+  updateDailyLog,
+  todayStr,
   getGoals,
   addWater,
-  resetWater,
-  addFood,
   getFoodLog,
   deleteFoodEntry,
-  logCreatine,
-  unlogCreatine,
-  updateDailyLog,
-  updateStreak,
   getSetting,
   setSetting,
-  todayStr,
+  getSupplementProgress,
+  getLatestWeight,
   DailyLog,
   Goals,
   FoodEntry,
 } from '../db/database';
 import { Card, Btn, ProgressBar, Ring, PickerModal, SectionHeader } from '../components/ui';
 import { SettingsButton } from '../components/SettingsButton';
-import { DragWidget, DRAG_LIST_PROPS } from '../components/DragWidget';
+import { DragBoard, DragBoardHandle, WidgetLabel } from '../components/DragWidget';
+import { SupplementsCard } from '../components/Supplements';
+import { WeightCard } from '../components/WeightTracker';
+import { TrackerTile } from '../components/TrackerTile';
+import { SupplementIcon } from '../components/SupplementIcon';
+import { ScanIcon } from '../components/ScanIcon';
 import { useTheme } from '../contexts/ThemeContext';
 import { logError } from '../utils/logError';
 import { useCustomAlert } from '../contexts/AlertContext';
@@ -43,15 +43,25 @@ import { WATER_OPTIONS } from '../constants/theme';
 import FoodScannerModal from '../components/FoodScannerModal';
 import FoodSearchModal from '../components/FoodSearchModal';
 
-export type TrackerSectionKey = 'water' | 'nutrition' | 'scanner' | 'creatine' | 'habits';
+// The barcode & label scanner lives in the header now, not in the list
+export type TrackerSectionKey = 'water' | 'nutrition' | 'supplements' | 'weight' | 'habits';
 
 const DEFAULT_SECTIONS: TrackerSectionKey[] = [
   'water',
   'nutrition',
-  'scanner',
-  'creatine',
+  'supplements',
+  'weight',
   'habits',
 ];
+const OPEN_KEY = 'tracker_open_sections';
+
+const SECTION_INFO: Record<TrackerSectionKey, { title: string; icon: string }> = {
+  water:       { title: 'Water Intake', icon: 'water-outline' },
+  nutrition:   { title: 'Nutrition', icon: 'restaurant-outline' },
+  supplements: { title: 'Supplements', icon: 'leaf-outline' },
+  weight:      { title: 'Body Weight', icon: 'scale-outline' },
+  habits:      { title: 'Daily Habits', icon: 'checkmark-circle-outline' },
+};
 
 export default function TrackerScreen() {
   const { showAlert } = useCustomAlert();
@@ -60,25 +70,31 @@ export default function TrackerScreen() {
   const [log, setLog] = useState<DailyLog | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
   const [foods, setFoods] = useState<FoodEntry[]>([]);
-  const [refresh, setRefresh] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [scannerModal, setScannerModal] = useState(false);
 
   const [waterModal, setWaterModal] = useState(false);
   const [lastWaterAdd, setLastWaterAdd] = useState(0);
   const [foodModal, setFoodModal] = useState(false);
 
-  const flatListRef = useRef<any>(null);
+  const boardRef = useRef<DragBoardHandle>(null);
 
   // Widget custom ordering state
   const [sections, setSections] = useState<TrackerSectionKey[]>(() => {
     try {
       const saved = getSetting('tracker_sections_order', '');
       if (saved) {
-        const parsed = JSON.parse(saved);
+        // Supplements took Creatine's place
+        const parsed = (JSON.parse(saved) as any[]).map(k => (k === 'creatine' ? 'supplements' : k));
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const valid = parsed.filter((k: any) => DEFAULT_SECTIONS.includes(k));
-          const missing = DEFAULT_SECTIONS.filter(k => !valid.includes(k));
-          return [...valid, ...missing];
+          const valid: TrackerSectionKey[] = parsed.filter((k: any) => DEFAULT_SECTIONS.includes(k));
+          // New sections go in after the one they follow by default (Body Weight after Supplements)
+          DEFAULT_SECTIONS.forEach((k, i) => {
+            if (valid.includes(k)) return;
+            const after = valid.indexOf(DEFAULT_SECTIONS[i - 1]);
+            valid.splice(after >= 0 ? after + 1 : valid.length, 0, k);
+          });
+          return valid;
         }
       }
     } catch (e) { logError('trackerLayout', e); }
@@ -91,36 +107,46 @@ export default function TrackerScreen() {
   // Section scroll-to
   // `t` changes on every request (e.g. a notification tap) so we re-scroll even if already here
   const { openSection, t: openNonce } = useLocalSearchParams<{ openSection?: string; t?: string }>();
+  const router = useRouter();
+
+  // Which sections are open (all closed at first, so the whole page is visible at a glance)
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(getSetting(OPEN_KEY, '{}')) || {}; } catch { return {}; }
+  });
+  const toggleOpen = (k: TrackerSectionKey) => setOpen(o => {
+    const next = { ...o, [k]: !o[k] };
+    try { setSetting(OPEN_KEY, JSON.stringify(next)); } catch (e) { logError('trackerOpen', e); }
+    return next;
+  });
+
+  // Numbers for the closed cards' one-line summaries
+  const [summary, setSummary] = useState({ weight: null as number | null, weightGoal: 0, suppTaken: 0, suppTotal: 0 });
 
   const load = useCallback(() => {
+    const g = getGoals();
     setLog(getTodayLog());
-    setGoals(getGoals());
+    setGoals(g);
     setFoods(getFoodLog());
+    const supp = getSupplementProgress();
+    setSummary({ weight: getLatestWeight(), weightGoal: g.weight_goal || 0, suppTaken: supp.taken, suppTotal: supp.total });
+    setRefreshKey(k => k + 1);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       load();
       if (openSection) {
-        setTimeout(() => {
-          const targetIdx = sections.indexOf(openSection as TrackerSectionKey);
-          if (targetIdx >= 0 && flatListRef.current) {
-            try {
-              flatListRef.current.scrollToIndex({ index: targetIdx, animated: true, viewPosition: 0 });
-            } catch (_) {}
-          }
-        }, 350);
+        // A section asked for from elsewhere opens, then scrolls into view
+        if (DEFAULT_SECTIONS.includes(openSection as TrackerSectionKey)) setOpen(o => ({ ...o, [openSection]: true }));
+        // Wait for the widgets to be measured before scrolling to one
+        setTimeout(() => boardRef.current?.scrollToKey(openSection, 0), 350);
+        // A request is used once: opening the Tracker tab later starts at the top as usual
+        router.setParams({ openSection: undefined, t: undefined } as any);
       }
-    }, [load, openSection, openNonce, sections])
+    }, [load, openSection, openNonce, router])
   );
 
-  const onRefresh = () => {
-    setRefresh(true);
-    load();
-    setRefresh(false);
-  };
-
-  const handleDragEnd = ({ data }: { data: TrackerSectionKey[] }) => {
+  const handleDragEnd = useCallback((data: TrackerSectionKey[]) => {
     if (!data || !Array.isArray(data) || data.length === 0) return;
     const valid = Array.from(new Set(data.filter(k => DEFAULT_SECTIONS.includes(k))));
     const missing = DEFAULT_SECTIONS.filter(k => !valid.includes(k));
@@ -129,8 +155,7 @@ export default function TrackerScreen() {
     try {
       setSetting('tracker_sections_order', JSON.stringify(finalData));
     } catch (e) { logError('trackerLayout', e); }
-    try { Vibration.vibrate(22); } catch (_) {}
-  };
+  }, []);
 
   const handleResetLayout = () => {
     setSections(DEFAULT_SECTIONS);
@@ -159,11 +184,9 @@ export default function TrackerScreen() {
         case 'nutrition':
           setFoodModal(true);
           break;
-        case 'scanner':
-          setScannerModal(true);
-          break;
-        case 'creatine':
-          toggleHabit('creatine_taken');
+        case 'supplements':
+        case 'weight':
+          boardRef.current?.scrollToKey(key, 0);
           break;
         case 'habits':
           showAlert('Daily Habits', 'Tap any habit card on the tracker screen to mark it done or pending.');
@@ -173,11 +196,6 @@ export default function TrackerScreen() {
   };
 
   const styles = makeStyles(C, isDark);
-
-  const handleScannerLogFood = (name: string, protein: number, calories: number) => {
-    addFood(name, protein, calories);
-    load();
-  };
 
   if (!log || !goals) return null;
 
@@ -203,50 +221,23 @@ export default function TrackerScreen() {
     }
   };
 
-  const handleLogFoodsFromModal = (items: Array<{ name: string; protein: number; calories: number }>) => {
-    for (const item of items) {
-      addFood(item.name, item.protein, item.calories);
-    }
-    load();
-    if (items.length === 1) {
-      showAlert('Food Logged ✓', `Added ${items[0].name} (${items[0].calories} kcal, ${items[0].protein}g protein)!`);
-    } else {
-      const totCals = items.reduce((a, b) => a + b.calories, 0);
-      const totProt = items.reduce((a, b) => a + b.protein, 0);
-      showAlert('Meal Logged ✓', `Added ${items.length} items (${totCals} kcal, ${totProt.toFixed(1)}g protein) to your daily intake!`);
-    }
-  };
-
-  const toggleHabit = (key: keyof DailyLog) => {
-    const cur = !!(log as any)[key];
-
-    if (key === 'creatine_taken') {
-      cur ? unlogCreatine() : logCreatine();
-    } else {
-      updateDailyLog(todayStr(), { [key]: cur ? 0 : 1 } as any);
-      if (key === 'workout_completed' && !cur) updateStreak();
-    }
-
-    load();
-  };
-
   const waterOptions = WATER_OPTIONS.map(w => ({
     label: w.label,
     value: String(w.ml),
   }));
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Section Renderers (100% of Original Code & Functionality Preserved)
+  // Sections: each is a compact card (summary + quick action) that opens to the full controls
   // ─────────────────────────────────────────────────────────────────────────
+  const indexOf = (k: TrackerSectionKey) => Math.max(0, sections.indexOf(k));
+  const habitsDone = [log.workout_completed, log.water_goal_reached, log.protein_goal_reached].filter(Boolean).length;
+  const fmtL = (l: number) => (Math.round(l * 100) / 100).toString();
+
   const renderWaterSection = (isActive: boolean) => (
-    <View style={styles.sectionWrap}>
-      <View style={styles.sectionHeaderRow}>
-        <SectionHeader title="Water Intake" icon="water-outline" />
-        <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? C.water : C.muted + '77'} />
-        </View>
-      </View>
-      <Card accent={C.water} style={isActive ? styles.activeCardGlow : undefined}>
+    <TrackerTile title="Water" color={C.water} icon={<Ionicons name="water" size={17} color={C.water} />}
+      summary={`${fmtL(log.water_intake)} / ${goals.water_goal || 0} L${waterPct >= 1 ? ' · goal reached' : ''}`}
+      progress={waterPct} open={!!open.water} onToggle={() => toggleOpen('water')} index={indexOf('water')} lifted={isActive}
+      action={{ label: '250 ml', icon: 'add', onPress: () => { addWater(250); setLastWaterAdd(250); load(); } }}>
         <View style={styles.section}>
           <View style={styles.macroTopRow}>
             <Ring value={waterPct} color={C.water} size={72} />
@@ -302,19 +293,14 @@ export default function TrackerScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      </Card>
-    </View>
+    </TrackerTile>
   );
 
   const renderNutritionSection = (isActive: boolean) => (
-    <View style={styles.sectionWrap}>
-      <View style={styles.sectionHeaderRow}>
-        <SectionHeader title="Nutrition" icon="restaurant-outline" />
-        <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? C.protein : C.muted + '77'} />
-        </View>
-      </View>
-      <Card accent={C.protein} style={isActive ? styles.activeCardGlow : undefined}>
+    <TrackerTile title="Nutrition" color={C.protein} icon={<Ionicons name="restaurant" size={16} color={C.protein} />}
+      summary={`${Math.round(log.protein_intake)} g protein · ${log.calorie_intake} kcal${foods.length ? ` · ${foods.length} food${foods.length === 1 ? '' : 's'}` : ''}`}
+      progress={proteinPct} open={!!open.nutrition} onToggle={() => toggleOpen('nutrition')} index={indexOf('nutrition')} lifted={isActive}
+      action={{ label: 'Food', icon: 'add', onPress: () => setFoodModal(true) }}>
         <View style={styles.section}>
           <View style={styles.nutritionStats}>
             <View style={styles.nutritionStat}>
@@ -367,97 +353,30 @@ export default function TrackerScreen() {
             </View>
           )}
         </View>
-      </Card>
-    </View>
+    </TrackerTile>
   );
 
-  const renderScannerSection = (isActive: boolean) => (
-    <View style={styles.sectionWrap}>
-      <View style={styles.sectionHeaderRow}>
-        <SectionHeader title="Scan & Calculate Macros" icon="barcode-outline" />
-        <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? '#4ADE80' : C.muted + '77'} />
-        </View>
-      </View>
-      <Card accent="#4ADE80" style={isActive ? styles.activeCardGlow : undefined}>
-        <View style={styles.section}>
-          <View style={styles.scannerHeroRow}>
-            <View style={[styles.scannerIconBox, { backgroundColor: isDark ? '#112F18' : '#DCFCE7' }]}>
-              <Ionicons name="scan" size={26} color="#4ADE80" />
-            </View>
-            <View style={{ flex: 1, marginLeft: 14 }}>
-              <Text style={styles.scannerHeroTitle}>Barcode & Label Scanner</Text>
-              <Text style={styles.scannerHeroSub}>
-                Scan barcodes or snap nutrition labels. Automatically calculates exact macros for your portion (e.g. 30g).
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={styles.openScannerBtn}
-            onPress={() => setScannerModal(true)}
-          >
-            <Ionicons name="camera" size={18} color="#0A0E1A" style={{ marginRight: 8 }} />
-            <Text style={styles.openScannerBtnTxt}>Open Barcode & Label Scanner</Text>
-          </TouchableOpacity>
-        </View>
-      </Card>
-    </View>
+  const renderWeightSection = (isActive: boolean) => (
+    <TrackerTile title="Body Weight" color={C.water} icon={<Ionicons name="scale" size={16} color={C.water} />}
+      summary={summary.weight ? `${summary.weight.toFixed(1)} kg${summary.weightGoal ? ` · target ${summary.weightGoal} kg` : ''}` : 'Log your first weigh-in'}
+      open={!!open.weight} onToggle={() => toggleOpen('weight')} index={indexOf('weight')} lifted={isActive}>
+      <WeightCard refreshKey={refreshKey} onChanged={load} />
+    </TrackerTile>
   );
 
-  const renderCreatineSection = (isActive: boolean) => (
-    <View style={styles.sectionWrap}>
-      <View style={styles.sectionHeaderRow}>
-        <SectionHeader title="Creatine" icon="flash-outline" />
-        <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? C.green : C.muted + '77'} />
-        </View>
-      </View>
-      <Card accent={log.creatine_taken ? C.green : C.red} style={isActive ? styles.activeCardGlow : undefined}>
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={[
-              styles.creatineBtn,
-              {
-                borderColor: log.creatine_taken ? C.green : C.border,
-                backgroundColor: log.creatine_taken ? C.greenDim : C.bg,
-              },
-            ]}
-            onPress={() => toggleHabit('creatine_taken')}
-          >
-            <Ionicons name="flash-outline" size={32} color={log.creatine_taken ? C.green : C.muted} style={{ marginBottom: 6 }} />
-            <Text
-              style={[
-                styles.creatineBtnText,
-                { color: log.creatine_taken ? C.green : C.muted },
-              ]}
-            >
-              {log.creatine_taken ? '✓ Taken Today' : 'Mark as Taken'}
-            </Text>
-
-            {log.creatine_time && (
-              <Text style={styles.creatineTime}>
-                Logged at {new Date(log.creatine_time).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </Card>
-    </View>
+  const renderSupplementsSection = (isActive: boolean) => (
+    <TrackerTile title="Supplements" color={C.teal} icon={<SupplementIcon size={18} color={C.teal} />}
+      summary={summary.suppTotal ? `${summary.suppTaken} of ${summary.suppTotal} taken today` : 'Add the supplements you take'}
+      progress={summary.suppTotal ? summary.suppTaken / summary.suppTotal : undefined}
+      open={!!open.supplements} onToggle={() => toggleOpen('supplements')} index={indexOf('supplements')} lifted={isActive}>
+      <SupplementsCard refreshKey={refreshKey} onChanged={load} />
+    </TrackerTile>
   );
 
   const renderHabitsSection = (isActive: boolean) => (
-    <View style={styles.sectionWrap}>
-      <View style={styles.sectionHeaderRow}>
-        <SectionHeader title="Daily Habits" icon="checkmark-circle-outline" />
-        <View style={styles.dragGripBox}>
-          <Ionicons name="reorder-two" size={18} color={isActive ? C.accent : C.muted + '77'} />
-        </View>
-      </View>
-      <Card accent={C.accent} style={isActive ? styles.activeCardGlow : undefined}>
+    <TrackerTile title="Daily Habits" color={C.green} icon={<Ionicons name="checkmark-done" size={17} color={C.green} />}
+      summary={`${habitsDone} of 3 done · workout, water, protein`} progress={habitsDone / 3}
+      open={!!open.habits} onToggle={() => toggleOpen('habits')} index={indexOf('habits')} lifted={isActive}>
         <View style={styles.section}>
           {(([
             ['workout_completed',    'barbell-outline',     'Workout Completed',    'Auto-tracked when a session is logged in Workouts.'],
@@ -494,6 +413,31 @@ export default function TrackerScreen() {
             );
           })}
 
+          {/* Sleep can't be tracked automatically: a tap marks it (it fills Overall's sleep ring) */}
+          <TouchableOpacity
+            activeOpacity={0.75}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              updateDailyLog(todayStr(), { slept_well: log.slept_well ? 0 : 1 });
+              load();
+            }}
+            style={[styles.habitRow, !!log.slept_well && { backgroundColor: C.purple + '1A', borderRadius: 12, paddingHorizontal: 10, borderBottomWidth: 0 }]}
+            accessibilityRole="checkbox" accessibilityState={{ checked: !!log.slept_well }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <View style={[styles.habitIconWrap, { backgroundColor: log.slept_well ? C.purple + '22' : C.border + '44' }]}>
+                <Ionicons name="moon-outline" size={18} color={log.slept_well ? C.purple : C.muted} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.habitText, !!log.slept_well && { color: C.text, fontWeight: '700' }]}>Slept Well</Text>
+                <Text style={styles.habitSub}>Tap to mark last night</Text>
+              </View>
+            </View>
+            <View style={[styles.habitStatus, { backgroundColor: log.slept_well ? C.purple : C.border }]}>
+              <Ionicons name={log.slept_well ? 'checkmark' : 'ellipse-outline'} size={14} color={log.slept_well ? '#fff' : C.muted} />
+            </View>
+          </TouchableOpacity>
+
           <View style={{ marginTop: 16 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
               <Text style={{ fontSize: 11, color: C.muted, fontWeight: '600' }}>Daily Progress</Text>
@@ -508,22 +452,26 @@ export default function TrackerScreen() {
             />
           </View>
         </View>
-      </Card>
-    </View>
+    </TrackerTile>
   );
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Render Draggable Item
+  // Widgets on the board
   // ─────────────────────────────────────────────────────────────────────────
-  const renderItem = ({ item, drag, isActive }: RenderItemParams<TrackerSectionKey>) => (
-    <DragWidget drag={drag} isActive={isActive}>
-      {item === 'water' && renderWaterSection(isActive)}
-      {item === 'nutrition' && renderNutritionSection(isActive)}
-      {item === 'scanner' && renderScannerSection(isActive)}
-      {item === 'creatine' && renderCreatineSection(isActive)}
-      {item === 'habits' && renderHabitsSection(isActive)}
-    </DragWidget>
-  );
+  const renderItem = (item: TrackerSectionKey, isActive: boolean) => {
+    switch (item) {
+      case 'water': return renderWaterSection(isActive);
+      case 'nutrition': return renderNutritionSection(isActive);
+      case 'supplements': return renderSupplementsSection(isActive);
+      case 'weight': return renderWeightSection(isActive);
+      case 'habits': return renderHabitsSection(isActive);
+    }
+  };
+
+  const sectionColor: Record<TrackerSectionKey, string> = {
+    water: C.water, nutrition: C.protein, supplements: C.teal, weight: C.water, habits: C.green,
+  };
+  const labelFor = (k: TrackerSectionKey): WidgetLabel => ({ ...SECTION_INFO[k], color: sectionColor[k] });
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -540,22 +488,30 @@ export default function TrackerScreen() {
           </Text>
         </View>
 
-        <SettingsButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {/* Barcode & nutrition-label scanner */}
+          <TouchableOpacity onPress={() => setScannerModal(true)} activeOpacity={0.8}
+            style={[styles.scanPill, { borderColor: '#4ADE80' + '88', backgroundColor: '#4ADE80' + '1A' }]}
+            accessibilityLabel="Scan and calculate macros" hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
+            <ScanIcon size={16} color="#22C55E" />
+            <View>
+              <Text style={styles.scanTxt}>Scan</Text>
+              <Text style={styles.scanSub}>& calculate macros</Text>
+            </View>
+          </TouchableOpacity>
+          <SettingsButton />
+        </View>
       </View>
 
-      {/* ── Interactive Draggable FlatList ── */}
-      <DraggableFlatList
-        ref={flatListRef}
+      {/* ── Widgets: hold one to move it ── */}
+      <DragBoard
+        ref={boardRef}
         data={sections}
-        extraData={sections}
-        onDragEnd={handleDragEnd}
-        keyExtractor={(item) => item}
+        onReorder={handleDragEnd}
         renderItem={renderItem}
-        {...DRAG_LIST_PROPS}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        ListFooterComponent={
+        labelFor={labelFor}
+        onRefresh={load}
+        footer={
           <TouchableOpacity style={[styles.customizeBtn, { borderColor: C.border }]} onPress={() => setEditModal(true)} activeOpacity={0.75}>
             <Ionicons name="apps-outline" size={16} color={C.accent} />
             <Text style={[styles.customizeTxt, { color: C.accent }]}>Customize sections</Text>
@@ -571,19 +527,19 @@ export default function TrackerScreen() {
         onClose={() => setWaterModal(false)}
       />
 
-      {/* Search Food, Calculate Portion & Multi-Item Meal Logger */}
+      {/* Add food: search, recent foods, type it in (each food is logged as it's added) */}
       <FoodSearchModal
         visible={foodModal}
         onClose={() => setFoodModal(false)}
-        onLogFoods={handleLogFoodsFromModal}
-        onOpenBarcodeScanner={() => setScannerModal(true)}
+        onChanged={load}
+        onOpenScanner={() => setScannerModal(true)}
       />
 
-      {/* Barcode & Nutrition Label Scanner Modal */}
+      {/* Barcode & nutrition-label scanner */}
       <FoodScannerModal
         visible={scannerModal}
         onClose={() => setScannerModal(false)}
-        onLogFood={handleScannerLogFood}
+        onChanged={load}
       />
 
       {/* ── Edit / Configure Widgets Modal ── */}
@@ -618,27 +574,13 @@ export default function TrackerScreen() {
 
             <View style={styles.glassWidgetList}>
               {sections.map((key, idx) => {
-                const labels: Record<string, string> = {
-                  water: 'Water Intake',
-                  nutrition: 'Nutrition',
-                  scanner: 'Scan & Calculate Macros',
-                  creatine: 'Creatine',
-                  habits: 'Daily Habits',
-                };
-                const icons: Record<string, any> = {
-                  water: 'water-outline',
-                  nutrition: 'restaurant-outline',
-                  scanner: 'barcode-outline',
-                  creatine: 'flash-outline',
-                  habits: 'checkmark-circle-outline',
-                };
                 return (
                   <View key={key} style={[styles.glassWidgetRow, { borderColor: C.border }]}>
                     <View style={[styles.glassWidgetNum, { backgroundColor: C.accent + '18' }]}>
                       <Text style={[styles.glassWidgetNumTxt, { color: C.accent }]}>{idx + 1}</Text>
                     </View>
-                    <Ionicons name={icons[key]} size={16} color={C.muted} style={{ marginHorizontal: 8 }} />
-                    <Text style={[styles.glassWidgetLabel, { color: C.text }]} numberOfLines={1}>{labels[key]}</Text>
+                    <Ionicons name={SECTION_INFO[key].icon as any} size={16} color={C.muted} style={{ marginHorizontal: 8 }} />
+                    <Text style={[styles.glassWidgetLabel, { color: C.text }]} numberOfLines={1}>{SECTION_INFO[key].title}</Text>
 
                     {/* Direct Edit Button */}
                     <TouchableOpacity
@@ -716,6 +658,9 @@ function makeStyles(C: any, isDark?: boolean) {
     },
     headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
     headerDate: { fontSize: 12, color: C.muted },
+    scanPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 38, borderRadius: 12, borderWidth: 1 },
+    scanTxt: { fontSize: 13, fontWeight: '900', color: '#22C55E', lineHeight: 15 },
+    scanSub: { fontSize: 9, fontWeight: '700', color: C.muted, lineHeight: 11 },
     editHeaderBtn: {
       width: 38,
       height: 38,
@@ -960,21 +905,6 @@ function makeStyles(C: any, isDark?: boolean) {
     foodName: { fontSize: 13, color: C.text, marginBottom: 2 },
     foodMacros: { fontSize: 11 },
     deleteBtn: { padding: 8 },
-    creatineBtn: {
-      alignItems: 'center',
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: C.border,
-      paddingVertical: 24,
-      backgroundColor: C.card,
-      shadowColor: isDark ? '#000000' : '#BFC8D6',
-      shadowOffset: { width: 6, height: 6 },
-      shadowOpacity: isDark ? 0.3 : 0.9,
-      shadowRadius: 12,
-      elevation: 8,
-    },
-    creatineBtnText: { fontSize: 16, fontWeight: '700' },
-    creatineTime: { fontSize: 11, color: C.muted, marginTop: 4 },
     habitRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',

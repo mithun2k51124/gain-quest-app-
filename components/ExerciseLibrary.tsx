@@ -5,6 +5,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, FlatList, S
 import { Ionicons } from '@expo/vector-icons';
 import { EXERCISE_CATALOG, MUSCLE_GROUP_ORDER, CatalogExercise } from '../constants/exerciseCatalog';
 import { ExerciseGuideModal } from './ExerciseGuide';
+import { BookIcon } from './BookIcon';
 import { useTheme } from '../contexts/ThemeContext';
 
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
@@ -129,6 +130,9 @@ export function ExerciseLibrary({ visible, onClose }: { visible: boolean; onClos
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.head}>
+            <View style={[styles.bookBox, { backgroundColor: C.accent + '1F' }]}>
+              <BookIcon size={28} color={C.accent} />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Exercise Library</Text>
               <Text style={styles.sub}>{EXERCISE_CATALOG.length} exercises · tap one for a preview</Text>
@@ -188,6 +192,7 @@ function makeStyles(C: any) {
     sheet:      { height: '92%', backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 18, paddingTop: 12, borderWidth: 1, borderColor: C.border },
     handle:     { width: 40, height: 5, backgroundColor: C.border, borderRadius: 3, alignSelf: 'center', marginBottom: 14 },
     head:       { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    bookBox:    { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
     title:      { fontSize: 20, fontWeight: '800', color: C.text },
     sub:        { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 2 },
     closeBtn:   { width: 32, height: 32, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg, borderWidth: 1, borderColor: C.border },

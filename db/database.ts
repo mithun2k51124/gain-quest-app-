@@ -43,7 +43,6 @@ export function initializeDatabase(): void {
       protein_goal REAL DEFAULT 120.0,
       calorie_goal INTEGER DEFAULT 2800,
       weight_goal REAL DEFAULT 75.0,
-      creatine_dose REAL DEFAULT 5.0,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -53,8 +52,6 @@ export function initializeDatabase(): void {
       water_intake REAL DEFAULT 0.0,
       protein_intake REAL DEFAULT 0.0,
       calorie_intake INTEGER DEFAULT 0,
-      creatine_taken INTEGER DEFAULT 0,
-      creatine_time TEXT,
       workout_completed INTEGER DEFAULT 0,
       water_goal_reached INTEGER DEFAULT 0,
       protein_goal_reached INTEGER DEFAULT 0,
@@ -180,24 +177,12 @@ export function initializeDatabase(): void {
   const goalCount = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM goals');
   if (!goalCount || goalCount.c === 0) {
     db.execSync(`
-      INSERT INTO goals (water_goal, protein_goal, calorie_goal, weight_goal, creatine_dose)
-      VALUES (0.0, 0.0, 0, 0.0, 0.0);
+      INSERT INTO goals (water_goal, protein_goal, calorie_goal, weight_goal)
+      VALUES (0.0, 0.0, 0, 0.0);
     `);
   }
 
-  const planCount = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM workout_plans');
-  if (!planCount || planCount.c === 0) {
-    db.execSync(`
-      INSERT INTO workout_plans (day_of_week, plan_name, muscle_groups) VALUES
-      ('Monday', 'Chest & Triceps', 'Chest,Triceps'),
-      ('Tuesday', 'Back & Biceps', 'Back,Biceps'),
-      ('Wednesday', 'Legs', 'Legs'),
-      ('Thursday', 'Shoulders', 'Shoulders'),
-      ('Friday', 'Full Pull', 'Back,Biceps,Shoulders'),
-      ('Saturday', 'Full Push', 'Chest,Triceps,Shoulders'),
-      ('Sunday', 'Rest Day', 'Rest');
-    `);
-  }
+  // No starter plan: the week stays empty until the user builds a split or plans days themselves
 
   const mgCount = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM muscle_tracker');
   if (!mgCount || mgCount.c === 0) {
@@ -305,6 +290,54 @@ const MIGRATIONS: ((db: DbLike) => void)[] = [
     // personal_records is rebuilt from the (renamed) entries
     new Set(Object.values(LEGACY_EXERCISE_NAMES)).forEach(n => syncPersonalRecord(db, n));
   },
+  // v7: supplements replace creatine — the user's own list, a taken-today log, and supplement
+  // reminders (reminders.ref_id = supplement id). Creatine reminders are removed.
+  (db) => db.execSync(`
+    CREATE TABLE IF NOT EXISTS supplements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      dose TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT '',
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS supplement_logs (
+      supplement_id INTEGER NOT NULL,
+      log_date TEXT NOT NULL,
+      taken_at TEXT NOT NULL,
+      PRIMARY KEY (supplement_id, log_date)
+    );
+    ALTER TABLE reminders ADD COLUMN ref_id INTEGER;
+    DELETE FROM reminders WHERE kind = 'creatine';
+  `),
+  // v8: drop the old made-up starter week (Chest & Triceps, ...) if it was never touched and no
+  // exercises were planned, so nothing shows as planned until the user plans it
+  (db) => {
+    const exercises = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM workout_plan_exercises')?.c ?? 0;
+    const starter = db.getFirstSync<{ c: number }>(`
+      SELECT COUNT(*) as c FROM workout_plans WHERE
+        (day_of_week='Monday' AND plan_name='Chest & Triceps' AND muscle_groups='Chest,Triceps') OR
+        (day_of_week='Tuesday' AND plan_name='Back & Biceps' AND muscle_groups='Back,Biceps') OR
+        (day_of_week='Wednesday' AND plan_name='Legs' AND muscle_groups='Legs') OR
+        (day_of_week='Thursday' AND plan_name='Shoulders' AND muscle_groups='Shoulders') OR
+        (day_of_week='Friday' AND plan_name='Full Pull' AND muscle_groups='Back,Biceps,Shoulders') OR
+        (day_of_week='Saturday' AND plan_name='Full Push' AND muscle_groups='Chest,Triceps,Shoulders') OR
+        (day_of_week='Sunday' AND plan_name='Rest Day' AND muscle_groups='Rest')`)?.c ?? 0;
+    const total = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM workout_plans')?.c ?? 0;
+    if (exercises === 0 && starter === 7 && total === 7) db.execSync('DELETE FROM workout_plans');
+  },
+  // v9: the same, day by day: any starter day still as it was and with no exercises goes
+  (db) => db.execSync(`
+    DELETE FROM workout_plans WHERE
+      day_of_week NOT IN (SELECT DISTINCT day_of_week FROM workout_plan_exercises) AND (
+        (day_of_week='Monday' AND plan_name='Chest & Triceps' AND muscle_groups='Chest,Triceps') OR
+        (day_of_week='Tuesday' AND plan_name='Back & Biceps' AND muscle_groups='Back,Biceps') OR
+        (day_of_week='Wednesday' AND plan_name='Legs' AND muscle_groups='Legs') OR
+        (day_of_week='Thursday' AND plan_name='Shoulders' AND muscle_groups='Shoulders') OR
+        (day_of_week='Friday' AND plan_name='Full Pull' AND muscle_groups='Back,Biceps,Shoulders') OR
+        (day_of_week='Saturday' AND plan_name='Full Push' AND muscle_groups='Chest,Triceps,Shoulders') OR
+        (day_of_week='Sunday' AND plan_name='Rest Day' AND muscle_groups='Rest'));
+  `),
 ];
 
 function runMigrations(db: DbLike): void {
@@ -343,7 +376,6 @@ export interface Goals {
   protein_goal: number;
   calorie_goal: number;
   weight_goal: number;
-  creatine_dose: number;
 }
 
 export function getGoals(): Goals {
@@ -354,7 +386,6 @@ export function getGoals(): Goals {
     protein_goal: 0,
     calorie_goal: 0,
     weight_goal: 0,
-    creatine_dose: 0,
   };
 }
 
@@ -374,10 +405,28 @@ export function updateGoals(g: Partial<Goals>): void {
 
   db.runSync(
     `INSERT OR REPLACE INTO goals
-     (id, water_goal, protein_goal, calorie_goal, weight_goal, creatine_dose, updated_at)
-     VALUES (1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-    [merged.water_goal, merged.protein_goal, merged.calorie_goal, merged.weight_goal, merged.creatine_dose]
+     (id, water_goal, protein_goal, calorie_goal, weight_goal, updated_at)
+     VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    [merged.water_goal, merged.protein_goal, merged.calorie_goal, merged.weight_goal]
   );
+  // A raised (or lowered) goal changes whether today's is met
+  refreshGoalFlags(todayStr());
+}
+
+/**
+ * Whether an intake reaches its goal. Intakes are float sums (thirty 100 ml glasses add up to
+ * 2.9999… L), so a hair under still counts; a goal of 0 is never "reached".
+ */
+export const reachedGoal = (intake: number, goal: number) => goal > 0 && intake >= goal - 1e-6;
+
+/** Re-works out a day's water and protein "goal reached" flags from its intake and today's goals. */
+export function refreshGoalFlags(logDate: string): void {
+  const goals = getGoals();
+  const log = getTodayLog(logDate);
+  updateDailyLog(logDate, {
+    water_goal_reached: reachedGoal(log.water_intake, goals.water_goal) ? 1 : 0,
+    protein_goal_reached: reachedGoal(log.protein_intake, goals.protein_goal) ? 1 : 0,
+  });
 }
 
 export function getSetting(key: string, def = ''): string {
@@ -395,8 +444,6 @@ export interface DailyLog {
   water_intake: number;
   protein_intake: number;
   calorie_intake: number;
-  creatine_taken: number;
-  creatine_time: string | null;
   workout_completed: number;
   water_goal_reached: number;
   protein_goal_reached: number;
@@ -428,9 +475,7 @@ export function addWater(amountMl: number, logDate?: string): void {
   db.runSync('INSERT OR IGNORE INTO daily_logs (log_date) VALUES (?)', [d]);
   db.runSync('UPDATE daily_logs SET water_intake=water_intake+? WHERE log_date=?', [amountMl / 1000, d]);
 
-  const goals = getGoals();
-  const log = getTodayLog(d);
-  updateDailyLog(d, { water_goal_reached: log.water_intake >= goals.water_goal ? 1 : 0 });
+  refreshGoalFlags(d);
 }
 
 export function resetWater(logDate?: string): void {
@@ -448,11 +493,12 @@ export interface FoodEntry {
   calories: number;
 }
 
-export function addFood(foodName: string, protein: number, calories: number, logDate?: string): void {
+/** Logs a food and returns its id (so it can be taken back out). */
+export function addFood(foodName: string, protein: number, calories: number, logDate?: string): number {
   const db = getDb();
   const d = logDate || todayStr();
 
-  db.runSync('INSERT INTO food_log (log_date, food_name, protein, calories) VALUES (?, ?, ?, ?)', [
+  const { lastInsertRowId } = db.runSync('INSERT INTO food_log (log_date, food_name, protein, calories) VALUES (?, ?, ?, ?)', [
     d,
     foodName,
     protein,
@@ -463,9 +509,18 @@ export function addFood(foodName: string, protein: number, calories: number, log
     'UPDATE daily_logs SET protein_intake=protein_intake+?, calorie_intake=calorie_intake+? WHERE log_date=?',
     [protein, calories, d]
   );
-  const goals = getGoals();
-  const log = getTodayLog(d);
-  updateDailyLog(d, { protein_goal_reached: log.protein_intake >= goals.protein_goal ? 1 : 0 });
+  refreshGoalFlags(d);
+  return lastInsertRowId;
+}
+
+/** Foods logged lately (newest first, each name once), for one-tap logging again. */
+export function getRecentFoods(limit = 12): { food_name: string; protein: number; calories: number }[] {
+  return getDb().getAllSync<{ food_name: string; protein: number; calories: number }>(
+    `SELECT f.food_name, f.protein, f.calories FROM food_log f
+     JOIN (SELECT food_name, MAX(id) AS id FROM food_log GROUP BY food_name) last ON last.id = f.id
+     ORDER BY f.id DESC LIMIT ?`,
+    [limit]
+  );
 }
 
 export function getFoodLog(logDate?: string): FoodEntry[] {
@@ -484,9 +539,7 @@ export function deleteFoodEntry(id: number): void {
     'UPDATE daily_logs SET protein_intake=protein_intake-?, calorie_intake=calorie_intake-? WHERE log_date=?',
     [row.protein, row.calories, row.log_date]
   );
-  const goals = getGoals();
-  const log = getTodayLog(row.log_date);
-  updateDailyLog(row.log_date, { protein_goal_reached: log.protein_intake >= goals.protein_goal ? 1 : 0 });
+  refreshGoalFlags(row.log_date);
 }
 
 export function updateFoodEntry(id: number, foodName: string, protein: number, calories: number): void {
@@ -506,24 +559,80 @@ export function updateFoodEntry(id: number, foodName: string, protein: number, c
     'UPDATE daily_logs SET protein_intake=protein_intake+?, calorie_intake=calorie_intake+? WHERE log_date=?',
     [diffProt, diffCals, row.log_date]
   );
-  const goals = getGoals();
-  const log = getTodayLog(row.log_date);
-  updateDailyLog(row.log_date, { protein_goal_reached: log.protein_intake >= goals.protein_goal ? 1 : 0 });
+  refreshGoalFlags(row.log_date);
 }
 
-export function logCreatine(logDate?: string): void {
+// ── Supplements ────────────────────────────────────────────────────────────
+// The user's own supplements, ticked off once a day. Reminders for one live in the
+// reminders table as kind 'supplement' with ref_id = the supplement's id.
+
+export interface Supplement {
+  id: number;
+  name: string;
+  dose: string;     // free text: '1 capsule', '5 g', or ''
+  color: string;    // accent colour, '' = theme default
+  sort: number;
+}
+
+export function getSupplements(): Supplement[] {
+  return getDb().getAllSync<Supplement>('SELECT id, name, dose, color, sort FROM supplements ORDER BY sort, id');
+}
+
+export function addSupplement(name: string, dose: string, color: string): number {
   const db = getDb();
-  const d = logDate || todayStr();
-  db.runSync('INSERT OR IGNORE INTO daily_logs (log_date) VALUES (?)', [d]);
-  db.runSync('UPDATE daily_logs SET creatine_taken=1, creatine_time=? WHERE log_date=?', [
-    new Date().toISOString(),
-    d,
-  ]);
+  const next = (db.getFirstSync<{ s: number | null }>('SELECT MAX(sort) as s FROM supplements')?.s ?? -1) + 1;
+  return db.runSync(
+    'INSERT INTO supplements (name, dose, color, sort) VALUES (?, ?, ?, ?)', [name, dose, color, next]
+  ).lastInsertRowId;
 }
 
-export function unlogCreatine(logDate?: string): void {
+export function updateSupplement(id: number, fields: Partial<Omit<Supplement, 'id'>>): void {
+  const keys = Object.keys(fields);
+  if (!keys.length) return;
+  getDb().runSync(
+    `UPDATE supplements SET ${keys.map(k => `${k}=?`).join(',')} WHERE id=?`,
+    [...Object.values(fields), id]
+  );
+}
+
+/** Removes a supplement with its history and its reminders. */
+export function deleteSupplement(id: number): void {
+  const db = getDb();
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM supplement_logs WHERE supplement_id=?', [id]);
+    db.runSync("DELETE FROM reminders WHERE kind='supplement' AND ref_id=?", [id]);
+    db.runSync('DELETE FROM supplements WHERE id=?', [id]);
+  });
+}
+
+/** Supplement id → time it was taken (ISO), for one day. */
+export function getSupplementsTaken(logDate?: string): Record<number, string> {
+  const rows = getDb().getAllSync<{ supplement_id: number; taken_at: string }>(
+    'SELECT supplement_id, taken_at FROM supplement_logs WHERE log_date=?', [logDate || todayStr()]
+  );
+  return Object.fromEntries(rows.map(r => [r.supplement_id, r.taken_at]));
+}
+
+export function setSupplementTaken(id: number, taken: boolean, logDate?: string): void {
   const d = logDate || todayStr();
-  getDb().runSync('UPDATE daily_logs SET creatine_taken=0, creatine_time=NULL WHERE log_date=?', [d]);
+  if (taken) {
+    getDb().runSync(
+      'INSERT OR REPLACE INTO supplement_logs (supplement_id, log_date, taken_at) VALUES (?, ?, ?)',
+      [id, d, new Date().toISOString()]
+    );
+  } else {
+    getDb().runSync('DELETE FROM supplement_logs WHERE supplement_id=? AND log_date=?', [id, d]);
+  }
+}
+
+/** How many of the current supplements were taken on a day. */
+export function getSupplementProgress(logDate?: string): { taken: number; total: number } {
+  const total = getDb().getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM supplements')?.c ?? 0;
+  const taken = getDb().getFirstSync<{ c: number }>(
+    `SELECT COUNT(*) as c FROM supplement_logs l JOIN supplements s ON s.id = l.supplement_id
+     WHERE l.log_date=?`, [logDate || todayStr()]
+  )?.c ?? 0;
+  return { taken, total };
 }
 
 export interface WorkoutPlan {
@@ -710,7 +819,9 @@ function insertExercise(
     [sessionId, sessionDate, exerciseName, muscleGroup, sets, reps, weight, unit]
   );
   db.runSync('INSERT OR IGNORE INTO muscle_tracker (muscle_group) VALUES (?)', [muscleGroup]);
-  db.runSync('UPDATE muscle_tracker SET last_trained=?, total_sessions=total_sessions+1 WHERE muscle_group=?', [
+  // A back-dated session never moves "last trained" back in time
+  db.runSync(`UPDATE muscle_tracker SET last_trained=MAX(COALESCE(last_trained, ''), ?), total_sessions=total_sessions+1
+              WHERE muscle_group=?`, [
     sessionDate,
     muscleGroup,
   ]);
@@ -790,6 +901,14 @@ export function getExerciseLogsSince(date: string): ExerciseLog[] {
   return getDb().getAllSync<ExerciseLog>(
     'SELECT * FROM exercise_logs WHERE session_date>=? ORDER BY session_date ASC, id ASC',
     [date]
+  );
+}
+
+/** The most recent log of an exercise (sets, reps, weight), if there is one. */
+export function getLastExerciseLog(exerciseName: string): ExerciseLog | null {
+  return getDb().getFirstSync<ExerciseLog>(
+    'SELECT * FROM exercise_logs WHERE exercise_name=? ORDER BY session_date DESC, id DESC LIMIT 1',
+    [exerciseName]
   );
 }
 
@@ -980,7 +1099,7 @@ export function isPRExerciseStarred(exerciseName: string): boolean {
 }
 
 // ── Reminders ──────────────────────────────────────────────────────────────
-export type ReminderKind = 'water' | 'protein' | 'creatine' | 'workout' | 'custom';
+export type ReminderKind = 'water' | 'protein' | 'supplement' | 'workout' | 'custom';
 
 export interface Reminder {
   id: number;
@@ -990,6 +1109,7 @@ export interface Reminder {
   minute: number;
   days: string;    // weekdays as getDay() digits, e.g. '0123456' = every day
   enabled: number;
+  ref_id: number | null;  // the supplement a 'supplement' reminder is for
 }
 
 export function getReminders(): Reminder[] {
@@ -997,11 +1117,12 @@ export function getReminders(): Reminder[] {
 }
 
 export function addReminder(
-  kind: ReminderKind, label: string, hour: number, minute: number, days = '0123456', enabled = 1
+  kind: ReminderKind, label: string, hour: number, minute: number, days = '0123456', enabled = 1,
+  refId: number | null = null
 ): number {
   return getDb().runSync(
-    'INSERT INTO reminders (kind, label, hour, minute, days, enabled) VALUES (?, ?, ?, ?, ?, ?)',
-    [kind, label, hour, minute, days, enabled]
+    'INSERT INTO reminders (kind, label, hour, minute, days, enabled, ref_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [kind, label, hour, minute, days, enabled, refId]
   ).lastInsertRowId;
 }
 
@@ -1048,6 +1169,10 @@ export interface WeightEntry {
 export function logWeight(weight: number, recordDate?: string): void {
   const d = recordDate || todayStr();
   getDb().runSync('INSERT OR REPLACE INTO weight_history (record_date, weight) VALUES (?, ?)', [d, weight]);
+}
+
+export function deleteWeightEntry(recordDate: string): void {
+  getDb().runSync('DELETE FROM weight_history WHERE record_date=?', [recordDate]);
 }
 
 export function getWeightHistory(days = 90): WeightEntry[] {
@@ -1142,7 +1267,7 @@ export interface WeeklyStats {
   workouts: number;
   waterSuccess: number;
   proteinSuccess: number;
-  creatineTaken: number;
+  supplementDays: number;   // days every supplement was taken
   daysElapsed: number;
 }
 
@@ -1157,12 +1282,17 @@ export function getWeeklyStats(): WeeklyStats {
   const ws = toDateStr(weekStart);
 
   const q = (sql: string) => (db.getFirstSync<{ c: number }>(sql, [ws])?.c) ?? 0;
+  const supplements = db.getFirstSync<{ c: number }>('SELECT COUNT(*) as c FROM supplements')?.c ?? 0;
 
   return {
     workouts: q('SELECT COUNT(*) as c FROM daily_logs WHERE log_date>=? AND workout_completed=1'),
     waterSuccess: q('SELECT COUNT(*) as c FROM daily_logs WHERE log_date>=? AND water_goal_reached=1'),
     proteinSuccess: q('SELECT COUNT(*) as c FROM daily_logs WHERE log_date>=? AND protein_goal_reached=1'),
-    creatineTaken: q('SELECT COUNT(*) as c FROM daily_logs WHERE log_date>=? AND creatine_taken=1'),
+    supplementDays: supplements === 0 ? 0 : q(`
+      SELECT COUNT(*) as c FROM (
+        SELECT l.log_date FROM supplement_logs l JOIN supplements s ON s.id = l.supplement_id
+        WHERE l.log_date>=? GROUP BY l.log_date HAVING COUNT(*) >= (SELECT COUNT(*) FROM supplements)
+      )`),
     daysElapsed: daysSinceMonday + 1,
   };
 }
@@ -1197,6 +1327,8 @@ export function resetDatabase(): void {
     DROP TABLE IF EXISTS custom_exercises;
     DROP TABLE IF EXISTS pr_entries;
     DROP TABLE IF EXISTS reminders;
+    DROP TABLE IF EXISTS supplements;
+    DROP TABLE IF EXISTS supplement_logs;
     PRAGMA user_version = 0;
   `);
   // user_version is reset so migrations re-apply on top of the fresh baseline tables
@@ -1299,8 +1431,10 @@ export function getWaterLog(logDate?: string): WaterEntry[] {
 export function getNutritionDates(): string[] {
   const db = getDb();
   const rows = db.getAllSync<{ d: string }>(`
-    SELECT DISTINCT log_date as d FROM daily_logs 
-    WHERE protein_intake > 0 OR calorie_intake > 0 OR water_intake > 0 OR creatine_taken = 1
+    SELECT DISTINCT log_date as d FROM daily_logs
+    WHERE protein_intake > 0 OR calorie_intake > 0 OR water_intake > 0
+    UNION
+    SELECT DISTINCT log_date as d FROM supplement_logs
     UNION
     SELECT DISTINCT log_date as d FROM food_log
     UNION

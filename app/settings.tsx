@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity,
   Modal, TextInput, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +18,7 @@ import { Card, SectionHeader, Btn, SelectBtn, PickerModal, Toggle } from '../com
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { HeaderBack } from '../components/HeaderBack';
+import { RefreshScrollView } from '../components/PullToRefresh';
 
 // Option generators
 const range = (start: number, end: number, step = 1) => {
@@ -30,9 +31,8 @@ const WATER_OPTS   = range(1, 6, 0.5).map(v => ({ label: `${v} L`, value: String
 const PROTEIN_OPTS = range(60, 300, 5).map(v => ({ label: `${v} g`, value: String(v) }));
 const CAL_OPTS     = range(1200, 5000, 50).map(v => ({ label: `${v} kcal`, value: String(v) }));
 const WEIGHT_OPTS  = range(40, 150, 0.5).map(v => ({ label: `${v} kg`, value: String(v) }));
-const CREAT_OPTS   = ['3','3.5','4','4.5','5','5.5','6','7','8','10'].map(v => ({ label: `${v} g`, value: v }));
 
-type ModalKey = 'water'|'protein'|'calories'|'weight'|'creatine'|null;
+type ModalKey = 'water'|'protein'|'calories'|'weight'|null;
 
 export default function SettingsScreen() {
   const { showAlert } = useCustomAlert();
@@ -40,18 +40,12 @@ export default function SettingsScreen() {
   const [goals,    setGoals]    = useState<Goals | null>(null);
   const [name,     setNameVal]  = useState('Athlete');
   const [modal,    setModal]    = useState<ModalKey>(null);
-  const [refresh,  setRefresh]  = useState(false);
   const [profilePic, setProfilePic] = useState<string | null>(null);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [editNameText, setEditNameText] = useState('');
 
-  // Pending changes
-  const [pending, setPending] = useState<Partial<Goals>>({});
-
   const load = useCallback(() => {
-    const g = getGoals();
-    setGoals(g);
-    setPending({});
+    setGoals(getGoals());
     setNameVal(getSetting('name', 'Athlete'));
     setProfilePic(getSetting('profile_pic', '') || null);
   }, []);
@@ -61,27 +55,16 @@ export default function SettingsScreen() {
       load();
     }, [load])
   );
-  const onRefresh = () => { setRefresh(true); load(); setRefresh(false); };
 
   const styles = makeStyles(C, isDark);
 
   if (!goals) return null;
 
-  const merged = { ...goals, ...pending };
-
-  const setPend = (key: keyof Goals, val: number) => {
-    setPending((p: any) => ({ ...p, [key]: val }));
-  };
-
-  const saveGoals = () => {
-    if (!Object.keys(pending).length) {
-      showAlert('No changes', 'Adjust a goal first.');
-      return;
-    }
-    updateGoals(pending);
-    setSetting('name', name);
-    load();
-    showAlert('Saved ✓', 'Your goals have been updated!');
+  // A goal is saved the moment it's picked
+  const merged = goals;
+  const saveGoal = (key: keyof Goals, val: number) => {
+    updateGoals({ [key]: val });
+    setGoals(getGoals());
   };
 
   const handleResetData = () => {
@@ -151,7 +134,6 @@ export default function SettingsScreen() {
     protein:  { opts: PROTEIN_OPTS, key: 'protein_goal' },
     calories: { opts: CAL_OPTS,     key: 'calorie_goal' },
     weight:   { opts: WEIGHT_OPTS,  key: 'weight_goal' },
-    creatine: { opts: CREAT_OPTS,   key: 'creatine_dose' },
   };
 
   const curModal = modal ? (modalOptions as any)[modal] : null;
@@ -163,8 +145,7 @@ export default function SettingsScreen() {
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}>
+      <RefreshScrollView contentContainerStyle={styles.scroll} onRefresh={load}>
 
         {/* ── Profile Card ────────────────────────────────────────────────── */}
         <View style={styles.profileCard}>
@@ -225,21 +206,6 @@ export default function SettingsScreen() {
               color={C.water}
               icon="scale-outline"
               onPress={() => setModal('weight')} />
-            <SelectBtn label="Creatine Dose"
-              value={`${merged.creatine_dose} g / day`}
-              color={C.green}
-              icon="flash-outline"
-              onPress={() => setModal('creatine')} />
-
-            {Object.keys(pending).length > 0 && (
-              <View style={styles.pendingBanner}>
-                <Text style={styles.pendingText}>
-                  {Object.keys(pending).length} change{Object.keys(pending).length > 1 ? 's' : ''} pending
-                </Text>
-              </View>
-            )}
-
-            <Btn label="Save Goals" icon="save-outline" color={C.accent} onPress={saveGoals} />
           </View>
         </Card>
 
@@ -275,7 +241,7 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
-      </ScrollView>
+      </RefreshScrollView>
 
       {/* Picker modal for any goal */}
       {modal && curModal && (
@@ -285,7 +251,7 @@ export default function SettingsScreen() {
           options={curModal.opts}
           onSelect={v => {
             const num = parseFloat(v);
-            if (!isNaN(num)) setPend(curModal.key, num);
+            if (!isNaN(num)) saveGoal(curModal.key, num);
             setModal(null);
           }}
           onClose={() => setModal(null)}
@@ -367,8 +333,6 @@ function makeStyles(C: any, isDark: boolean) { return StyleSheet.create({
   prefRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
   prefLabel:    { fontSize: 14, color: C.text, fontWeight: '600' },
   prefSub:      { fontSize: 11, color: C.muted, marginTop: 2 },
-  pendingBanner:{ backgroundColor: C.accentDim, borderRadius: 12, padding: 10, marginBottom: 12, alignItems: 'center' },
-  pendingText:  { color: C.accent, fontSize: 13, fontWeight: '700' },
   dangerText:   { fontSize: 13, color: C.muted, lineHeight: 20 },
 
   // Edit profile modal
