@@ -1,7 +1,7 @@
 // app/prs.tsx — Personal Records: summary dashboard, pinned lifts, editable PR entries
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, Modal, FlatList, KeyboardAvoidingView, Platform, useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -22,6 +22,7 @@ import { findExercise, MUSCLE_GROUP_ORDER } from '../constants/exerciseCatalog';
 import { WheelPicker } from '../components/WheelPicker';
 import { SettingsButton } from '../components/SettingsButton';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
+import { RefreshScrollView } from '../components/PullToRefresh';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MUSCLES = Object.keys(EXERCISE_LIBRARY);
@@ -215,7 +216,6 @@ export default function PRScreen() {
   const [custom, setCustom]   = useState<CustomExercise[]>([]);
   const [logged, setLogged]   = useState<string[]>([]);
   const [query, setQuery]     = useState('');
-  const [refresh, setRefresh] = useState(false);
 
   // Detail sheet
   const [detailEx, setDetailEx]   = useState<string | null>(null);
@@ -250,7 +250,6 @@ export default function PRScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-  const onRefresh = () => { setRefresh(true); load(); setRefresh(false); };
 
   // ── Lookups ──
   const prMap = useMemo(() => Object.fromEntries(prs.map(p => [p.exercise_name, p])), [prs]);
@@ -551,11 +550,11 @@ export default function PRScreen() {
         <SettingsButton />
       </View>
 
-      <ScrollView
+      <RefreshScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}
+        onRefresh={load}
       >
         <View style={styles.search}>
           <Ionicons name="search" size={17} color={C.muted} />
@@ -724,7 +723,7 @@ export default function PRScreen() {
             </View>
           </>
         )}
-      </ScrollView>
+      </RefreshScrollView>
 
       {/* ── View all: every logged exercise and the PRs broken in it ── */}
       <Modal visible={viewAll} transparent animationType="slide" onRequestClose={() => setViewAll(false)}>

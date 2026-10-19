@@ -2,11 +2,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Switch, TextInput,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Pressable,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  getReminders, addReminder, updateReminder, deleteReminder, getWorkoutPlans,
+  getReminders, addReminder, updateReminder, deleteReminder, getWorkoutPlans, getSupplements, getSupplementsTaken,
   DailyLog, Goals, Reminder, ReminderKind,
 } from '../db/database';
 import {
@@ -22,7 +23,9 @@ const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 const AMPM = ['AM', 'PM'];
-const KIND_ORDER: ReminderKind[] = ['water', 'protein', 'creatine', 'workout', 'custom'];
+const KIND_ORDER: ReminderKind[] = ['water', 'protein', 'supplement', 'workout', 'custom'];
+// Supplement reminders are set up from the Tracker's Supplements section, where the supplement is picked
+const ADDABLE_KINDS = KIND_ORDER.filter(k => k !== 'supplement');
 
 export function fmtTime(h: number, m: number): string {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
@@ -44,11 +47,16 @@ export function RemindersWidget({ log, goals, refreshKey, onEdit, onTurnOn }: {
   const styles = makeStyles(C);
   const colorOf = useKindColor();
 
-  const { enabled, today } = useMemo(() => {
+  const { enabled, today, taken, supplements } = useMemo(() => {
     const weekday = String(new Date().getDay());
+    const supplements = new Map(getSupplements().map(s => [s.id, s]));
     return {
       enabled: remindersEnabled(),
-      today: getReminders().filter(r => r.enabled && r.days.includes(weekday)),
+      // A supplement reminder whose supplement was deleted is left out
+      today: getReminders().filter(r => r.enabled && r.days.includes(weekday)
+        && (r.kind !== 'supplement' || (r.ref_id != null && supplements.has(r.ref_id)))),
+      taken: getSupplementsTaken(),
+      supplements,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey, log]);
@@ -77,7 +85,7 @@ export function RemindersWidget({ log, goals, refreshKey, onEdit, onTurnOn }: {
 
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const rows = today.map(r => {
-    const done = isReminderDone(r.kind, log, goals);
+    const done = isReminderDone(r, log, goals, taken);
     const rest = r.kind === 'workout' && (!todaysPlan || todaysPlan.muscle_groups === 'Rest');
     return { r, done, rest, past: r.hour * 60 + r.minute < nowMin };
   });
@@ -88,7 +96,10 @@ export function RemindersWidget({ log, goals, refreshKey, onEdit, onTurnOn }: {
     switch (r.kind) {
       case 'water':    return goals.water_goal > 0 ? `${log.water_intake.toFixed(1)} / ${goals.water_goal} L` : 'Stay hydrated';
       case 'protein':  return goals.protein_goal > 0 ? `${Math.round(log.protein_intake)} / ${goals.protein_goal} g` : 'Protein intake';
-      case 'creatine': return log.creatine_taken ? 'Taken today' : `${goals.creatine_dose || 5} g dose`;
+      case 'supplement': {
+        const s = r.ref_id != null ? supplements.get(r.ref_id) : undefined;
+        return r.ref_id != null && taken[r.ref_id] ? 'Taken today' : s?.dose || 'Supplement';
+      }
       case 'workout':  return rest ? 'Rest day — skipped' : log.workout_completed ? 'Workout logged' : todaysPlan?.plan_name ?? 'Training';
       default:         return 'Custom';
     }
@@ -145,11 +156,11 @@ export function RemindersWidget({ log, goals, refreshKey, onEdit, onTurnOn }: {
 
 type Group = { key: string; kind: ReminderKind; label: string; rows: Reminder[] };
 
-/** Rows sharing a kind (or, for custom, a name) form one reminder with several times. */
+/** Rows sharing a kind (for custom, a name; for supplements, the supplement) form one reminder with several times. */
 function groupReminders(list: Reminder[]): Group[] {
   const map = new Map<string, Group>();
   for (const r of list) {
-    const key = r.kind === 'custom' ? `custom:${r.label}` : r.kind;
+    const key = r.kind === 'custom' ? `custom:${r.label}` : r.kind === 'supplement' ? `supplement:${r.ref_id}` : r.kind;
     const g = map.get(key) ?? { key, kind: r.kind, label: r.label, rows: [] };
     g.rows.push(r);
     map.set(key, g);
@@ -162,11 +173,16 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
   const styles = makeStyles(C);
   const colorOf = useKindColor();
   const { showAlert } = useCustomAlert();
+  const insets = useSafeAreaInsets();
   const [list, setList] = useState<Reminder[]>([]);
   const [on, setOn] = useState(false);
   const [selId, setSelId] = useState<number | null>(null);
 
-  const reload = () => setList(getReminders());
+  const reload = () => {
+    // Reminders of a deleted supplement are hidden (they never fire either)
+    const ids = new Set(getSupplements().map(s => s.id));
+    setList(getReminders().filter(r => r.kind !== 'supplement' || (r.ref_id != null && ids.has(r.ref_id))));
+  };
   useEffect(() => {
     if (visible) { reload(); setOn(remindersEnabled()); setSelId(null); }
   }, [visible]);
@@ -212,7 +228,7 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
 
   const addTime = (g: Group) => {
     const { h, m } = suggestTime(g.rows);
-    const id = addReminder(g.kind, g.label, h, m, g.rows[0].days, g.rows[0].enabled);
+    const id = addReminder(g.kind, g.label, h, m, g.rows[0].days, g.rows[0].enabled, g.rows[0].ref_id);
     reload();
     setSelId(id);
   };
@@ -223,8 +239,10 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={close}>
-          <TouchableOpacity activeOpacity={1} onPress={e => e.stopPropagation()} style={styles.sheet}>
+        {/* The backdrop is its own layer, so it never competes with the sheet's scrolling */}
+        <View style={styles.overlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close" />
+          <View style={[styles.sheet, { paddingBottom: 28 + insets.bottom }]}>
             <View style={styles.handle} />
             <View style={styles.sheetHead}>
               <View style={{ flex: 1 }}>
@@ -235,7 +253,8 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
                 trackColor={{ false: C.border, true: C.accent }} thumbColor="#fff" />
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled
+              style={{ flexGrow: 0, flexShrink: 1 }}>
               {groups.length === 0 && (
                 <View style={styles.empty}>
                   <Ionicons name="notifications-outline" size={26} color={C.muted} />
@@ -324,7 +343,7 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
 
               <Text style={styles.addLabel}>Add</Text>
               <View style={styles.addRow}>
-                {KIND_ORDER.filter(k => k === 'custom' || !usedKinds.has(k)).map(k => {
+                {ADDABLE_KINDS.filter(k => k === 'custom' || !usedKinds.has(k)).map(k => {
                   const col = colorOf(k);
                   return (
                     <TouchableOpacity key={k} onPress={() => addGroup(k)} activeOpacity={0.8} style={styles.addChip}>
@@ -340,8 +359,8 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
             <TouchableOpacity style={styles.doneBtn} onPress={close} activeOpacity={0.85}>
               <Text style={styles.doneTxt}>Done</Text>
             </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );

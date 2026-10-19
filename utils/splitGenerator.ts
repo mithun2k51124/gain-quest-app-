@@ -7,7 +7,9 @@
 // 3. Each slot is filled from a curated pool (constants/exercisePools.ts), keeping only what the
 //    user can do: equipment they have, their strength (push-ups / pull-ups / squats), their level,
 //    and technique lifts they've done before. Lifts they haven't done come in from block 2.
-// 4. Plans run in blocks of a few weeks. Each new block rotates the exercises: accessories change
+// 4. Sets × reps follow the goal and level; starting weights follow bodyweight, level, the strength
+//    check, the goal's rep range, sex and age (see startingLoad()).
+// 5. Plans run in blocks of a few weeks. Each new block rotates the exercises: accessories change
 //    every block, main lifts every second block, so there's variety without losing progress.
 //
 // Rationale (summarised from research):
@@ -15,6 +17,8 @@
 // - Hitting each muscle about twice a week beats once a week when volume isn't matched
 //   (Schoenfeld et al. meta-analyses); total weekly sets matter most.
 // - Common practice: full body for 2–3 days, upper/lower for 4, PPL hybrids for 5, PPL×2 for 6.
+// - Rep ranges by goal (ACSM / NSCA): heavy ≤6 for strength, ~6–12 for size, 12–15+ with short
+//   rests for general fitness.
 import CATALOG from '../constants/exerciseCatalog.json';
 import {
   EquipmentAnswers, EquipmentId, HOME_ITEMS, ownedItems, canDo, primaryItem, missingItems, countAvailable,
@@ -28,6 +32,11 @@ import {
 } from '../constants/startingLoads';
 
 export type { Level };
+
+/** What the plan is for: rep ranges, rest and starting weights follow it. */
+export type Goal = 'muscle' | 'strength' | 'fitness';
+/** Used only to scale starting weights (strength standards differ by sex). */
+export type Sex = 'male' | 'female' | 'unspecified';
 
 export interface StrengthAnswers {
   push: number;   // 0 = none, 1 = 1–5, 2 = 6–15, 3 = 16–30, 4 = 30+
@@ -56,6 +65,9 @@ export interface SplitAnswers {
   skills?: SkillKey[];           // technique lifts done before
   block?: number;                // 0 = first block; exercises rotate each block
   bodyweightKg?: number;         // for starting weights; missing → DEFAULT_BODYWEIGHT_KG
+  goal?: Goal;                   // missing (older splits) → 'muscle'
+  sex?: Sex;                     // missing → 'unspecified'
+  age?: number;                  // from the profile, if set
 }
 
 export interface ExerciseChoice {
@@ -218,22 +230,48 @@ function fullBodySplit(days: number) {
   };
 }
 
-function dose(level: Level, compound: boolean): { sets: number; reps: string } {
+// Sets × reps by goal and level (ACSM / NSCA ranges: ~6–12 reps for size, ≤6 heavy reps for
+// strength, 12–15+ with short rests for general fitness; more sets as training age grows)
+function dose(level: Level, compound: boolean, goal: Goal = 'muscle'): { sets: number; reps: string } {
+  if (goal === 'strength') {
+    if (level === 'beginner') return compound ? { sets: 3, reps: '5–8' } : { sets: 3, reps: '8–12' };
+    if (level === 'intermediate') return compound ? { sets: 4, reps: '4–6' } : { sets: 3, reps: '8–10' };
+    return compound ? { sets: 5, reps: '3–5' } : { sets: 3, reps: '6–10' };
+  }
+  if (goal === 'fitness') {
+    if (level === 'beginner') return { sets: compound ? 3 : 2, reps: '12–15' };
+    return compound ? { sets: 3, reps: '10–15' } : { sets: 3, reps: '12–15' };
+  }
   if (level === 'beginner') return { sets: 3, reps: '8–12' };
   if (level === 'intermediate') return compound ? { sets: 4, reps: '6–10' } : { sets: 3, reps: '10–12' };
   return compound ? { sets: 4, reps: '5–8' } : { sets: 3, reps: '8–12' };
 }
 
+// Heavy work needs longer rests, so strength sessions fit fewer exercises
 const MINUTES_PER_EXERCISE: Record<Level, number> = { beginner: 7, intermediate: 8, advanced: 9 };
-const PRESCRIPTION: Record<Level, string> = {
-  beginner: '3 sets × 8–12 reps · 60–90 s rest · add weight when you hit 12',
-  intermediate: 'Main lifts 4 × 6–10, accessories 3 × 10–12 · 1.5–2 min rest',
-  advanced: 'Main lifts 4 × 5–8 (2–3 min rest), accessories 3 × 8–12',
+const GOAL_MINUTES: Record<Goal, number> = { muscle: 0, strength: 1.5, fitness: -1 };
+const PRESCRIPTION: Record<Goal, Record<Level, string>> = {
+  muscle: {
+    beginner: '3 sets × 8–12 reps · 60–90 s rest · add weight when you hit 12',
+    intermediate: 'Main lifts 4 × 6–10, accessories 3 × 10–12 · 1.5–2 min rest',
+    advanced: 'Main lifts 4 × 5–8 (2–3 min rest), accessories 3 × 8–12',
+  },
+  strength: {
+    beginner: 'Main lifts 3 × 5–8, accessories 3 × 8–12 · 2–3 min rest · add weight when every set hits the top',
+    intermediate: 'Main lifts 4 × 4–6 (2–3 min rest), accessories 3 × 8–10',
+    advanced: 'Main lifts 5 × 3–5 (3 min rest), accessories 3 × 6–10',
+  },
+  fitness: {
+    beginner: '2–3 sets × 12–15 reps · 45–60 s rest · keep the pace up',
+    intermediate: '3 sets × 10–15 reps · 45–60 s rest · keep the pace up',
+    advanced: '3 sets × 10–15 reps · 30–60 s rest · keep the pace up',
+  },
 };
 const BODYWEIGHT_PRESCRIPTION = 'Stop 1–2 reps short of failure · 60–90 s rest · when you hit the top of the range, take the harder version';
 
-export function exercisesPerSession(level: Level, minutes: number): number {
-  return Math.max(3, Math.min(8, Math.floor((minutes - 5) / MINUTES_PER_EXERCISE[level])));
+export function exercisesPerSession(level: Level, minutes: number, goal: Goal = 'muscle'): number {
+  const per = MINUTES_PER_EXERCISE[level] + GOAL_MINUTES[goal];
+  return Math.max(3, Math.min(8, Math.floor((minutes - 5) / per)));
 }
 
 // ── Choosing exercises ──────────────────────────────────────────────────────
@@ -247,7 +285,11 @@ const GYM_ONLY = new Set(['cable', 'smith', 'machines', 'rack']);
 
 interface Ctx {
   level: Level;
+  goal: Goal;
   rank: number;
+  // Starting-weight multipliers for upper- and lower-body lifts (sex and age)
+  loadUpper: number;
+  loadLower: number;
   owned: Set<string>;
   strength: StrengthAnswers;
   skills: Set<SkillKey>;
@@ -259,12 +301,36 @@ interface Ctx {
   caps: { dumbbell?: number; kettlebell?: number; plates?: number };
 }
 
+// Strength standards relative to bodyweight (strengthlevel.com, novice–intermediate) put women at
+// roughly 60–65% of men on upper-body lifts and 70–75% on lower-body lifts. Unspecified sits in
+// between, on the cautious side.
+const SEX_LOAD: Record<Sex, { upper: number; lower: number }> = {
+  male: { upper: 1, lower: 1 },
+  female: { upper: 0.62, lower: 0.72 },
+  unspecified: { upper: 0.8, lower: 0.85 },
+};
+
+/** A gentle reduction for teenagers and with age (first-session guesses should err light). */
+function ageFactor(age?: number): number {
+  if (!age || age < 10 || age > 100) return 1;
+  if (age < 18) return 0.85;
+  if (age < 40) return 1;
+  if (age < 50) return 0.95;
+  if (age < 60) return 0.88;
+  return 0.8;
+}
+
 function makeCtx(a: SplitAnswers): Ctx {
   const rank = RANK[a.level];
   const eq = a.equipment;
+  const sex = SEX_LOAD[a.sex ?? 'unspecified'];
+  const aged = ageFactor(a.age);
   return {
     level: a.level,
+    goal: a.goal ?? 'muscle',
     rank,
+    loadUpper: sex.upper * aged,
+    loadLower: sex.lower * aged,
     owned: ownedItems(eq),
     strength: a.strength ?? strengthDefaults(a.level),
     skills: new Set(a.skills ?? []),
@@ -397,6 +463,14 @@ const capAt = (kg: number, cap?: number) => (cap !== undefined ? Math.min(kg, ca
 const closestSize = (kg: number, sizes: number[]) =>
   sizes.reduce((best, s) => (Math.abs(s - kg) < Math.abs(best - kg) ? s : best), sizes[0]);
 
+// Fewer reps means a heavier weight: ~5 reps is about 85% of a max, ~10 about 75%, ~15 about 65%
+// (NSCA %1RM–reps table). The table above is set for ~10 reps.
+function goalLoad(goal: Goal, compound: boolean): number {
+  if (goal === 'strength') return compound ? 1.1 : 1;
+  if (goal === 'fitness') return 0.88;
+  return 1;
+}
+
 /** How heavy to start an exercise, as a label for the plan and a number for the log screen. */
 function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: string; kg?: number } {
   const entry = LOADS[name];
@@ -404,7 +478,9 @@ function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: stri
     return { load: primaryItem(name) === 'bands' ? BAND_LABEL[ctx.level] : 'Bodyweight' };
   }
   const [type, ratio] = entry;
-  const target = ctx.bodyweight * ratio * LEVEL_LOAD[ctx.level] * strengthFactor(pattern, ctx);
+  const { lower, compound } = PATTERNS[pattern];
+  const target = ctx.bodyweight * ratio * LEVEL_LOAD[ctx.level] * strengthFactor(pattern, ctx)
+    * (lower ? ctx.loadLower : ctx.loadUpper) * goalLoad(ctx.goal, compound);
   const { dumbbell, kettlebell, plates } = ctx.caps;
   const out = (kg: number, label = `${kg} kg`) => ({ load: label, kg });
   switch (type) {
@@ -450,7 +526,7 @@ function startingLoad(name: string, pattern: PatternKey, ctx: Ctx): { load: stri
 
 function choice(c: Candidate, pattern: PatternKey, ctx: Ctx): ExerciseChoice {
   const { compound, muscle } = PATTERNS[pattern];
-  const base = dose(ctx.level, compound);
+  const base = dose(ctx.level, compound, ctx.goal);
   const start = startingLoad(c.name, pattern, ctx);
   const out = (reps: string): ExerciseChoice => ({
     name: c.name,
@@ -531,24 +607,12 @@ function suggestItem(patterns: PatternKey[], ctx: Ctx, gym: boolean): EquipmentI
   return best ? (best[0] as EquipmentId) : null;
 }
 
-/** Technique lifts the user could be shown, given their equipment, level and strength. */
-export function skillOptions(a: SplitAnswers): SkillKey[] {
-  const ctx = makeCtx({ ...a, block: 0, skills: [] });
-  const all = Object.values(POOLS).flat();
-  return SKILL_ORDER.filter(skill => all.some(c => {
-    if (c.skill !== skill || !canDo(c.name, ctx.owned)) return false;
-    if (c.min && ctx.rank < RANK[c.min]) return false;
-    const ab = ability(c, ctx);
-    return !ab || ab.have >= ab.need;
-  }));
-}
-
 export function generateSplit(a: SplitAnswers): SplitPlan {
   const ctx = makeCtx(a);
   const days = Math.max(2, Math.min(6, a.daysPerWeek));
   const canTrainBack = rankedFor('hPull', ctx).length + rankedFor('vPull', ctx).length > 0;
   const split = canTrainBack ? pickSplit(a.level, days) : fullBodySplit(days);
-  const count = exercisesPerSession(a.level, a.minutes);
+  const count = exercisesPerSession(a.level, a.minutes, a.goal);
   const trainingDays = WEEK_ORDER.filter(d => !a.restDays.includes(d)).slice(0, days);
   const patternsUsed = new Set<PatternKey>();
 
@@ -582,7 +646,7 @@ export function generateSplit(a: SplitAnswers): SplitPlan {
   return {
     name: split.name,
     summary: split.summary,
-    prescription: loaded ? PRESCRIPTION[a.level] : BODYWEIGHT_PRESCRIPTION,
+    prescription: loaded ? PRESCRIPTION[a.goal ?? 'muscle'][a.level] : BODYWEIGHT_PRESCRIPTION,
     days: planned,
     gaps,
     laterSkills: SKILL_ORDER.filter(s => later.has(s)),

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { ParsedExercise } from '../utils/workoutParser';
 import {
@@ -18,10 +19,12 @@ import {
 } from '../utils/geminiParser';
 import {
   logWorkoutSession,
-  updateDailyLog, updateStreak, todayStr, getSetting,
+  updateDailyLog, updateStreak, todayStr, getSetting, setSetting,
   addFood,
 } from '../db/database';
 import { logError } from '../utils/logError';
+import { TapLogger, TapEntry } from './TapLogger';
+import { BAR_HEIGHT } from './AnimatedTabBar';
 
 const { height: SH, width: SW } = Dimensions.get('window');
 
@@ -38,6 +41,26 @@ try {
 }
 
 const VOICE_AVAILABLE = !!SpeechModule;
+
+// Tap = the body map, logged with fingers only; Voice and Type go through the AI parser
+type LogMode = 'tap' | 'voice' | 'type';
+const MODE_KEY = 'logit_mode';
+const MODES: { key: LogMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'tap', label: 'Tap', icon: 'body' },
+  { key: 'voice', label: 'Voice', icon: 'mic' },
+  { key: 'type', label: 'Type / Ask', icon: 'chatbox-ellipses' },
+];
+
+/** The mode used last time (Tap the first time). */
+function savedMode(): LogMode {
+  try {
+    const m = getSetting(MODE_KEY, 'tap') as LogMode;
+    if (m === 'voice' && !VOICE_AVAILABLE) return 'type';
+    return MODES.some(x => x.key === m) ? m : 'tap';
+  } catch {
+    return 'tap';
+  }
+}
 
 interface AIWorkoutLoggerProps {
   onLogged?: () => void;
@@ -61,12 +84,18 @@ function useSafeVoiceEvent(event: string, cb: (e: any) => void) {
 
 export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   const { C, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const [visible, setVisible]                 = useState(false);
   const [phase, setPhase]                     = useState<Phase>('idle');
   const [transcript, setTranscript]           = useState('');
   const [inputText, setInputText]             = useState('');
   const [chatFollowup, setChatFollowup]       = useState('');
-  const [isVoiceMode, setIsVoiceMode]         = useState(VOICE_AVAILABLE);
+  const [mode, setModeState]                  = useState<LogMode>(savedMode);
+  const isVoiceMode = mode === 'voice';
+  const setMode = (m: LogMode) => {
+    setModeState(m);
+    try { setSetting(MODE_KEY, m); } catch (e) { logError('logItMode', e); }
+  };
   const [hasPermission, setHasPermission]     = useState(false);
   const [parseError, setParseError]           = useState('');
   const [keyboardHeight, setKeyboardHeight]   = useState(0);
@@ -321,7 +350,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
   // ── Voice control: Single-Tap & High-Accuracy Free-Form Recognition ────────
   const startListening = async () => {
     if (!VOICE_AVAILABLE) {
-      setIsVoiceMode(false);
+      setMode('type');
       return;
     }
 
@@ -465,6 +494,18 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
     setTimeout(() => closeOverlay(), 2100);
   };
 
+  // ── Saved from the body map (TapLogger already wrote the workout) ─────────
+  const onTapSaved = (entries: TapEntry[]) => {
+    const sets = entries.reduce((n, e) => n + e.sets, 0);
+    setSuccessInfo({
+      title: 'Workout Logged! 💪',
+      subtitle: `${entries.length} exercise${entries.length > 1 ? 's' : ''}, ${sets} sets saved to Workouts & PRs.`,
+    });
+    setPhase('success');
+    onLogged?.();
+    setTimeout(() => closeOverlay(), 2100);
+  };
+
   const updateWorkoutField = (index: number, field: keyof ParsedExercise, value: any) => {
     setWorkoutExercises(prev => prev.map((item, idx) => idx === index ? { ...item, [field]: value } : item));
   };
@@ -506,8 +547,8 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
 
   return (
     <>
-      {/* ── Global Floating Assistant Button ── */}
-      <Animated.View style={[s.fabWrapper, { transform: [{ scale: fabScale }] }]}>
+      {/* ── Global Floating Assistant Button (just above the tab bar) ── */}
+      <Animated.View style={[s.fabWrapper, { bottom: BAR_HEIGHT + 7 + insets.bottom, transform: [{ scale: fabScale }] }]}>
         <TouchableOpacity
           style={s.fab}
           onPress={openOverlay}
@@ -535,7 +576,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeOverlay} />
         </Animated.View>
 
-        <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }], paddingBottom: keyboardHeight > 0 ? keyboardHeight + 8 : 36 }]}>
+        <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }], paddingBottom: keyboardHeight > 0 ? keyboardHeight + 8 : 36 + insets.bottom }]}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
             {/* Top Sheet Drag Handle */}
@@ -549,7 +590,9 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
                 </View>
                 <View>
                   <Text style={s.sheetTitle}>Log It</Text>
-                  <Text style={s.sheetSub}>Workouts • Nutrition • Fitness Coach</Text>
+                  <Text style={s.sheetSub}>
+                    {mode === 'tap' ? 'Tap a muscle · pick an exercise · set the numbers' : 'Workouts • Nutrition • Fitness Coach'}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity onPress={closeOverlay} style={s.closeBtn}>
@@ -561,34 +604,30 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
             {(phase === 'idle' || phase === 'listening') && (
               <View style={s.body}>
 
-                {/* Mode Selector */}
-                {VOICE_AVAILABLE && (
-                  <View style={s.modeToggle}>
-                    <TouchableOpacity
-                      style={[s.modeBtn, isVoiceMode && s.modeBtnActive]}
-                      onPress={() => {
-                        setIsVoiceMode(true);
-                        stopListening();
-                        setPhase('idle');
-                      }}
-                    >
-                      <Ionicons name="mic" size={15} color={isVoiceMode ? '#fff' : C.muted} />
-                      <Text style={[s.modeTxt, isVoiceMode && { color: '#fff' }]}>Voice</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[s.modeBtn, !isVoiceMode && s.modeBtnActive]}
-                      onPress={() => {
-                        setIsVoiceMode(false);
-                        stopListening();
-                        setPhase('idle');
-                        setTimeout(() => inputRef.current?.focus(), 150);
-                      }}
-                    >
-                      <Ionicons name="chatbox-ellipses" size={15} color={!isVoiceMode ? '#fff' : C.muted} />
-                      <Text style={[s.modeTxt, !isVoiceMode && { color: '#fff' }]}>Text / Ask</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                {/* Mode Selector: Tap (body map) · Voice · Type */}
+                <View style={s.modeToggle}>
+                  {MODES.filter(m => m.key !== 'voice' || VOICE_AVAILABLE).map(m => {
+                    const on = mode === m.key;
+                    return (
+                      <TouchableOpacity
+                        key={m.key}
+                        style={[s.modeBtn, on && s.modeBtnActive]}
+                        onPress={() => {
+                          setMode(m.key);
+                          stopListening();
+                          setPhase('idle');
+                          if (m.key === 'type') setTimeout(() => inputRef.current?.focus(), 150);
+                        }}
+                      >
+                        <Ionicons name={m.icon} size={15} color={on ? '#fff' : C.muted} />
+                        <Text style={[s.modeTxt, on && { color: '#fff' }]}>{m.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* ── Tap: log with the body map, no voice or typing ── */}
+                {mode === 'tap' && <TapLogger onSaved={onTapSaved} />}
 
                 {/* ── Siri/Bixby Voice Mode ── */}
                 {isVoiceMode && VOICE_AVAILABLE && (
@@ -707,7 +746,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
                 )}
 
                 {/* ── Text / Type Mode ── */}
-                {(!isVoiceMode || !VOICE_AVAILABLE) && (
+                {(mode === 'type' || (mode === 'voice' && !VOICE_AVAILABLE)) && (
                   <View style={s.typeArea}>
                     <View style={s.inputWrapper}>
                       <Ionicons name="chatbubble-outline" size={16} color={C.muted} style={{ marginTop: 2 }} />
@@ -719,7 +758,7 @@ export default function AIWorkoutLogger({ onLogged }: AIWorkoutLoggerProps) {
                         value={inputText}
                         onChangeText={setInputText}
                         multiline
-                        autoFocus={!VOICE_AVAILABLE}
+                        autoFocus={false}
                         onSubmitEditing={() => {
                           if (inputText.trim()) processInput(inputText);
                         }}
@@ -1113,7 +1152,7 @@ function makeStyles(C: any, isDark: boolean) {
   };
 
   return StyleSheet.create({
-    fabWrapper: { position: 'absolute', bottom: 75, alignSelf: 'center', zIndex: 999 },
+    fabWrapper: { position: 'absolute', alignSelf: 'center', zIndex: 999 },
     fab:        { shadowColor: C.accent, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.55, shadowRadius: 18, elevation: 14 },
     fabInner:   { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.accent, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 32 },
     fabLabel:   { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 0.3 },

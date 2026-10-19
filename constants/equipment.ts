@@ -30,6 +30,33 @@ export const EQUIPMENT_LABEL: Record<EquipmentId, string> = {
   cardio: 'Cardio machines', strongman: 'Strongman gear', specialty: 'Specialty gear', partner: 'Training partner',
 };
 
+/**
+ * What each item is, for people who don't know the names: a photo (an exercise from the library
+ * that shows the item clearly — free-exercise-db, public domain) and a one-line description.
+ */
+export const EQUIPMENT_INFO: Partial<Record<EquipmentId, { photo: string; about: string }>> = {
+  dumbbells:      { photo: 'Hammer Curls', about: 'Short hand weights, one in each hand. Fixed sizes on a rack, or an adjustable pair.' },
+  barbell:        { photo: 'Barbell Deadlift', about: 'A long bar (usually 20 kg) you load with round weight plates on each end.' },
+  rack:           { photo: 'Barbell Full Squat', about: 'A tall steel frame with hooks and safety bars, so you can squat and bench a barbell safely.' },
+  ez_bar:         { photo: 'EZ-Bar Curl', about: 'A short barbell with a zig-zag bend that is easier on the wrists for curls and skull crushers.' },
+  kettlebell:     { photo: 'One-Arm Kettlebell Swings', about: 'A cast-iron ball with a handle on top, for swings, goblet squats and presses.' },
+  bench:          { photo: 'Dumbbell Bench Press', about: 'A flat, padded weight bench for presses, rows and step-ups.' },
+  adj_bench:      { photo: 'Incline Dumbbell Press', about: 'A bench whose back rest tilts up, for incline presses and seated work.' },
+  cable:          { photo: 'Cable Crossover', about: 'A tall tower with a weight stack and pulleys. You pull a handle or rope on a cable: pulldowns, rows, crossovers.' },
+  smith:          { photo: 'Smith Machine Squat', about: 'A barbell fixed on rails inside a frame, so it only moves straight up and down.' },
+  machines:       { photo: 'Leg Extensions', about: 'Seated machines with a pin-loaded weight stack: leg press, leg extension, chest press and the like.' },
+  pullup_bar:     { photo: 'Pullups', about: 'A sturdy bar overhead to hang from, for pull-ups, chin-ups and hanging leg raises.' },
+  dip_bars:       { photo: 'Dips - Triceps Version', about: 'Two parallel handles at hip height, for dips and knee raises.' },
+  rings:          { photo: 'Suspended Row', about: 'Gymnastic rings or a TRX strap hanging from above, for rows, push-ups and fallouts.' },
+  bands:          { photo: 'Band Pull Apart', about: 'Stretchy rubber loops or tubes that add resistance, from light to heavy.' },
+  box:            { photo: 'Box Jump (Multiple Response)', about: 'A sturdy box, about knee height, to jump onto or step up on.' },
+  med_ball:       { photo: 'Medicine Ball Chest Pass', about: 'A weighted ball (2–10 kg) for throws, slams and weighted crunches.' },
+  stability_ball: { photo: 'Exercise Ball Crunch', about: 'A large inflatable ball (Swiss ball) for core work and hamstring curls.' },
+  ab_wheel:       { photo: 'Ab Roller', about: 'A small wheel with handles that you roll out along the floor, for core strength.' },
+  jump_rope:      { photo: 'Rope Jumping', about: 'A skipping rope, for warm-ups and conditioning.' },
+  foam_roller:    { photo: 'Iliotibial Tract-SMR', about: 'A firm foam cylinder for rolling out tight muscles before or after training.' },
+};
+
 /** Home checklist, most useful first. */
 export const HOME_ITEMS: EquipmentId[] = [
   'dumbbells', 'barbell', 'kettlebell', 'bench', 'bands', 'pullup_bar', 'dip_bars', 'rings',

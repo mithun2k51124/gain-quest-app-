@@ -93,7 +93,6 @@ export default function OnboardingModal({ visible, onComplete }: Props) {
   const [protein, setProtein] = useState('');
   const [calories, setCalories] = useState('');
   const [weightGoal, setWeightGoal] = useState('');
-  const [creatine, setCreatine] = useState('');
 
   // ── Animation ─────────────────────────────────────────────────────
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -130,7 +129,6 @@ export default function OnboardingModal({ visible, onComplete }: Props) {
       protein_goal: parseFloat(protein) || 0,
       calorie_goal: parseInt(calories, 10) || 0,
       weight_goal: parseFloat(weightGoal) || 0,
-      creatine_dose: parseFloat(creatine) || 0,
     });
 
     setOnboardingComplete();
@@ -262,16 +260,6 @@ export default function OnboardingModal({ visible, onComplete }: Props) {
                     onChangeText={setWeightGoal}
                     keyboardType="decimal-pad"
                     unit="kg"
-                  />
-                  <Field
-                    C={C}
-                    icon="flash-outline"
-                    label="Creatine Dose"
-                    placeholder="e.g. 5"
-                    value={creatine}
-                    onChangeText={setCreatine}
-                    keyboardType="decimal-pad"
-                    unit="g"
                   />
                 </View>
               )}

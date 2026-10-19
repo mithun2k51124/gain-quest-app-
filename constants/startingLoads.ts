@@ -1,9 +1,14 @@
 // constants/startingLoads.ts — how heavy to start each weighted exercise in a generated plan.
 // Each entry is the implement and a beginner's working weight for ~10 reps as a fraction of
-// bodyweight. The generator scales it by experience and the strength check, rounds it to weights
-// that exist (dumbbell steps, kettlebell sizes, a 20 kg bar...) and caps it at the heaviest
-// weights a home user has. The numbers are deliberately conservative: it's a first-session guess,
-// easy to go up from.
+// bodyweight. The generator scales it by experience, the strength check, sex, age and goal, rounds
+// it to weights that exist (dumbbell steps, kettlebell sizes, a 20 kg bar...) and caps it at the
+// heaviest weights a home user has. The numbers are deliberately conservative: it's a
+// first-session guess, easy to go up from.
+//
+// Where the ratios come from: novice strength standards (1-rep max ÷ bodyweight, strengthlevel.com,
+// male lifters) → ~75% of that for 10 reps (NSCA %1RM table) → about 85% of that again, so the
+// first session ends 2–3 reps short of failure. E.g. dumbbell curl: novice max ≈ 0.17 × bodyweight
+// per hand → 10 reps ≈ 0.13 → start ≈ 0.1.
 //
 // Implements:
 //   barbell  total weight including a 20 kg bar      ez     total including a 10 kg EZ bar
@@ -24,7 +29,7 @@ export const LOADS: Record<string, [LoadType, number]> = {
   'Front Barbell Squat': ['barbell', 0.4],
   'Hack Squat': ['sled', 0.4],
   'Leg Press': ['sled', 0.9],
-  'Goblet Squat': ['kb', 0.17],
+  'Goblet Squat': ['kb', 0.2],
   'Smith Machine Squat': ['smith', 0.45],
   'Dumbbell Squat': ['db', 0.1],
   'Front Squats With Two Kettlebells': ['kb2', 0.12],
@@ -43,7 +48,7 @@ export const LOADS: Record<string, [LoadType, number]> = {
   'Barbell Deadlift': ['barbell', 0.7],
   'Romanian Deadlift': ['barbell', 0.5],
   'Stiff-Legged Dumbbell Deadlift': ['db', 0.12],
-  'One-Arm Kettlebell Swings': ['kb', 0.2],
+  'One-Arm Kettlebell Swings': ['kb', 0.22],
   'Sumo Deadlift': ['barbell', 0.7],
   'Hyperextensions (Back Extensions)': ['bw', 0],
   'Cable Deadlifts': ['stack', 0.5],
@@ -63,7 +68,7 @@ export const LOADS: Record<string, [LoadType, number]> = {
   'Seated Leg Curl': ['stack', 0.3],
   'Standing Leg Curl': ['stack', 0.15],
   'Glute Ham Raise': ['bw', 0],
-  'Leg Extensions': ['stack', 0.35],
+  'Leg Extensions': ['stack', 0.4],
   'Single-Leg Leg Extension': ['stack', 0.17],
   // Calves
   'Standing Calf Raises': ['stack', 0.7],
@@ -114,16 +119,16 @@ export const LOADS: Record<string, [LoadType, number]> = {
   'Kettlebell Arnold Press': ['kb', 0.1],
   'Kettlebell Seated Press': ['kb', 0.1],
   'Cable Shoulder Press': ['stack', 0.2],
-  'Side Lateral Raise': ['db', 0.04],
+  'Side Lateral Raise': ['db', 0.06],
   'Cable Seated Lateral Raise': ['stack', 0.04],
-  'Seated Side Lateral Raise': ['db', 0.04],
-  'One-Arm Incline Lateral Raise': ['db', 0.035],
-  'Face Pull': ['stack', 0.2],
+  'Seated Side Lateral Raise': ['db', 0.06],
+  'One-Arm Incline Lateral Raise': ['db', 0.05],
+  'Face Pull': ['stack', 0.25],
   'Reverse Machine Flyes': ['stack', 0.25],
-  'Seated Bent-Over Rear Delt Raise': ['db', 0.04],
-  'Reverse Flyes': ['db', 0.04],
+  'Seated Bent-Over Rear Delt Raise': ['db', 0.05],
+  'Reverse Flyes': ['db', 0.05],
   'Cable Rear Delt Fly': ['stack', 0.05],
-  'Bent Over Dumbbell Rear Delt Raise With Head On Bench': ['db', 0.04],
+  'Bent Over Dumbbell Rear Delt Raise With Head On Bench': ['db', 0.05],
   // Back
   'Bent Over Barbell Row': ['barbell', 0.4],
   'Seated Cable Rows': ['stack', 0.45],
@@ -148,17 +153,17 @@ export const LOADS: Record<string, [LoadType, number]> = {
   'Straight-Arm Pulldown': ['stack', 0.25],
   // Biceps
   'Barbell Curl': ['barbell', 0.25],
-  'Dumbbell Bicep Curl': ['db', 0.08],
-  'Hammer Curls': ['db', 0.09],
-  'Incline Dumbbell Curl': ['db', 0.07],
+  'Dumbbell Bicep Curl': ['db', 0.1],
+  'Hammer Curls': ['db', 0.1],
+  'Incline Dumbbell Curl': ['db', 0.08],
   'EZ-Bar Curl': ['ez', 0.22],
   'Preacher Curl': ['ez', 0.18],
   'Standing Biceps Cable Curl': ['stack', 0.25],
   'Cable Hammer Curls - Rope Attachment': ['stack', 0.25],
   'Machine Bicep Curl': ['stack', 0.25],
   'Machine Preacher Curls': ['stack', 0.22],
-  'Concentration Curls': ['db', 0.07],
-  'Zottman Curl': ['db', 0.07],
+  'Concentration Curls': ['db', 0.08],
+  'Zottman Curl': ['db', 0.08],
   'Close-Grip EZ-Bar Curl with Band': ['ez', 0.18],
   // Triceps
   'Triceps Pushdown': ['stack', 0.3],

@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  RefreshControl, Dimensions, Modal, Image,
+  Dimensions, Modal, Image,
   FlatList, Alert, ActionSheetIOS, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -17,9 +17,10 @@ import {
   deleteProgressPhoto, ProgressPhoto,
   getWorkoutSessionsForDate, getExerciseLogsForDate, getWorkoutDates,
   getDailyLogForDate, getFoodLog, getWaterLog, getNutritionDates,
-  getAllPRs, WorkoutSession, ExerciseLog, FoodEntry, WaterEntry,
+  getAllPRs, getSupplements, getSupplementsTaken, WorkoutSession, ExerciseLog, FoodEntry, WaterEntry,
 } from '../db/database';
 import { Card, SectionHeader, ProgressBar, MuscleTag } from '../components/ui';
+import { RefreshScrollView } from '../components/PullToRefresh';
 import BodyAnatomy from '../components/BodyAnatomy';
 import { SettingsButton } from '../components/SettingsButton';
 import { HeaderBack } from '../components/HeaderBack';
@@ -57,7 +58,6 @@ export default function AnalyticsScreen() {
   const [logs, setLogs] = useState<DailyLog[]>([]);
   const [muscles, setMuscles] = useState<any[]>([]);
   const [goals, setGoals] = useState<Goals | null>(null);
-  const [refresh, setRefresh] = useState(false);
 
   // Selected date shared across detail views
   const [selectedDay, setSelectedDay] = useState<string>(todayStr());
@@ -118,12 +118,6 @@ export default function AnalyticsScreen() {
       loadAll();
     }, [loadAll])
   );
-
-  const onRefresh = () => {
-    setRefresh(true);
-    loadAll();
-    setRefresh(false);
-  };
 
   const openDayModal = (day: string, initialIdx = 0) => {
     const photos = getProgressPhotos(day);
@@ -220,8 +214,7 @@ export default function AnalyticsScreen() {
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={C.accent} />}>
+      <RefreshScrollView contentContainerStyle={styles.scroll} onRefresh={loadAll}>
 
         {/* ── OVERVIEW ───────────────────────────────────────────────── */}
         {tab === 'Overview' && weekly && (
@@ -232,7 +225,7 @@ export default function AnalyticsScreen() {
                 { icon:'barbell-outline', label:'Workouts', val: weekly.workouts, color: C.purple },
                 { icon:'water-outline', label:'Water Goals', val: weekly.waterSuccess, color: C.water },
                 { icon:'restaurant-outline', label:'Protein Goals', val: weekly.proteinSuccess, color: C.protein },
-                { icon:'flash-outline', label:'Creatine Days', val: weekly.creatineTaken, color: C.green },
+                { icon:'leaf-outline', label:'Supplement Days', val: weekly.supplementDays, color: C.teal },
               ].map((s, i) => (
                 <View key={i} style={styles.statBox}>
                   <Ionicons name={s.icon as any} size={28} color={s.color} style={{ marginBottom: 4 }} />
@@ -251,7 +244,6 @@ export default function AnalyticsScreen() {
                     { icon: 'water-outline', label: 'Water', key: 'water_goal_reached', color: C.water },
                     { icon: 'restaurant-outline', label: 'Protein', key: 'protein_goal_reached', color: C.protein },
                     { icon: 'barbell-outline', label: 'Workout', key: 'workout_completed', color: C.purple },
-                    { icon: 'flash-outline', label: 'Creatine', key: 'creatine_taken', color: C.green },
                   ].map(({ icon, label, key, color }) => {
                     const done = logs.filter(l => (l as any)[key]).length;
                     const pct  = logs.length ? done / logs.length : 0;
@@ -356,7 +348,7 @@ export default function AnalyticsScreen() {
           />
         )}
 
-      </ScrollView>
+      </RefreshScrollView>
 
       {/* Photo full-screen modal */}
       <Modal visible={photoModal} animationType="fade" presentationStyle="fullScreen" onRequestClose={() => setPhotoModal(false)}>
@@ -726,8 +718,10 @@ function NutritionTab({
   const waterGoal = goals?.water_goal || 3.0;
   const waterPct = waterGoal > 0 ? Math.min(waterIntake / waterGoal, 1) : 0;
 
-  const creatineTaken = !!dayDailyLog?.creatine_taken;
-  const hasNutrition = calIntake > 0 || protIntake > 0 || waterIntake > 0 || dayFoods.length > 0 || dayWater.length > 0 || creatineTaken;
+  // Supplements ticked off that day, out of the ones on the list now
+  const suppTotal = getSupplements().length;
+  const suppTaken = Object.keys(getSupplementsTaken(selectedDay)).length;
+  const hasNutrition = calIntake > 0 || protIntake > 0 || waterIntake > 0 || dayFoods.length > 0 || dayWater.length > 0 || suppTaken > 0;
 
   return (
     <>
@@ -831,27 +825,33 @@ function NutritionTab({
                 <ProgressBar value={waterPct} color={C.water} height={8} />
               </View>
 
-              {/* Creatine Row */}
-              <View style={styles.creatineRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name="flash" size={18} color={creatineTaken ? C.green : C.muted} style={{ marginRight: 6 }} />
-                  <Text style={[styles.consLabel, { color: creatineTaken ? C.text : C.muted }]}>
-                    Creatine Intake
-                  </Text>
-                </View>
-                <View style={[
-                  styles.statusBadge,
-                  {
-                    backgroundColor: creatineTaken ? C.green + '22' : (isDark ? C.card : '#E8ECF0'),
-                    borderColor: creatineTaken ? C.green : C.border,
-                    borderWidth: 1,
-                  }
-                ]}>
-                  <Text style={{ fontSize: 11, fontWeight: '800', color: creatineTaken ? C.green : C.muted }}>
-                    {creatineTaken ? 'Taken ✓' : 'Not Taken'}
-                  </Text>
-                </View>
-              </View>
+              {/* Supplements Row */}
+              {suppTotal + suppTaken > 0 && (() => {
+                const allTaken = suppTotal > 0 && suppTaken >= suppTotal;
+                const tint = allTaken ? C.green : suppTaken > 0 ? C.teal : C.muted;
+                return (
+                  <View style={styles.supplementRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="leaf" size={18} color={tint} style={{ marginRight: 6 }} />
+                      <Text style={[styles.consLabel, { color: suppTaken > 0 ? C.text : C.muted }]}>
+                        Supplements
+                      </Text>
+                    </View>
+                    <View style={[
+                      styles.statusBadge,
+                      {
+                        backgroundColor: suppTaken > 0 ? tint + '22' : (isDark ? C.card : '#E8ECF0'),
+                        borderColor: suppTaken > 0 ? tint : C.border,
+                        borderWidth: 1,
+                      }
+                    ]}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: tint }}>
+                        {allTaken ? 'All taken ✓' : `${suppTaken} of ${suppTotal} taken`}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })()}
             </View>
           </Card>
 
@@ -1715,7 +1715,7 @@ function makeStyles(C: any, isDark: boolean) {
     // Specific Day Details Styling
     statusBadge:   { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'center' },
     pillBadge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
-    creatineRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 6 },
+    supplementRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 6 },
     foodItemRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
     exItemRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
     exDot:         { width: 8, height: 8, borderRadius: 4, marginRight: 8 },

@@ -122,7 +122,7 @@ export default function BodyAnatomy({
     return (
       <View style={[styles.side, { minHeight: bh }]}>
         <Text style={styles.sideTitle}>{title}</Text>
-        {list.length === 0 && <Text style={styles.sideNone}>â€”</Text>}
+        {list.length === 0 && <Text style={styles.sideNone}>—</Text>}
         {list.map(([muscle, sets], i) => {
           const shade = shadeFor(sets);
           return (
