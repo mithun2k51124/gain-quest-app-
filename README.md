@@ -161,6 +161,53 @@ gainquest-mobile/
 - Node.js 18+ (the repo uses `legacy-peer-deps`, see `.npmrc`)
 - For Android builds: JDK 17 and the Android SDK
 
+### Setting up a second machine (Windows)
+The versions below are the ones the main PC builds with. Install them in this order:
+
+| Tool | Version | Notes |
+|---|---|---|
+| Git | 2.4x+ | Sign in to GitHub on first push (Git Credential Manager opens a browser) |
+| Node.js | 24.x (npm 11) | LTS installer from nodejs.org |
+| JDK | Temurin 17 | adoptium.net; tick "Set JAVA_HOME" in the installer |
+| Android Studio | latest | Only needed for the SDK Manager (and an emulator, if wanted) |
+| Android SDK | Platform 36 and 37, Build-Tools 35/36/37, NDK 27.1.12297006, CMake 3.22.1, Platform-Tools | SDK Manager → *SDK Platforms* and *SDK Tools* (tick "Show Package Details") |
+
+Gradle 8.14.3 and all Gradle/Maven libraries download on their own the first time `gradlew` runs;
+npm libraries come from `npm ci`. Nothing else needs installing by hand.
+
+Environment variables (System Properties → Environment Variables), then open a new terminal:
+- `JAVA_HOME` = `C:\Program Files\Eclipse Adoptium\jdk-17...`
+- `ANDROID_HOME` = `C:\Users\<you>\AppData\Local\Android\Sdk`
+- Add `%ANDROID_HOME%\platform-tools` to `Path` (gives you `adb`)
+
+Get the code and build:
+```powershell
+git clone https://github.com/mithun2k51124/gain-quest-app-.git gainquest-mobile
+cd gainquest-mobile
+npm ci
+cd android
+.\gradlew.bat assembleRelease   # first run takes a long time (downloads Gradle + deps)
+```
+`android/local.properties` is not in git. If Gradle says it can't find the SDK, create it with
+`sdk.dir=C:/Users/<you>/AppData/Local/Android/Sdk`.
+
+**Release key (copy by hand, never commit).** To install an APK over the copy already on your phone, both
+machines must sign with the same key. Copy these from the main PC over USB or a private cloud folder:
+- `android/app/gainquest-release.keystore` → same path on the new machine
+- the four `GAINQUEST_RELEASE_*` lines in `%USERPROFILE%\.gradle\gradle.properties` → same file on the new machine
+
+Without them the build falls back to the debug key, and Android will refuse to update the installed app.
+You'd have to uninstall it first, which deletes the app's data on the phone.
+
+**Day-to-day sync between machines**
+```powershell
+git pull            # always before starting work
+npm ci              # only when package.json / package-lock.json changed
+# ...work...
+git add -A; git commit -m "message"; git push   # always before switching machines
+```
+If `package.json` gained a native library, run `.\gradlew.bat clean` before the next build.
+
 ### Run in development
 ```bash
 npm install
