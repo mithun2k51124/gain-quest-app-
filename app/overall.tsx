@@ -29,6 +29,8 @@ import {
 } from '../db/database';
 import { SectionHeader } from '../components/ui';
 import { SettingsButton } from '../components/SettingsButton';
+import { ScoreBadge } from '../components/HeaderBadges';
+import { TITLE_COMPACT_STYLE } from '../constants/fonts';
 import { RefreshScrollView } from '../components/PullToRefresh';
 import { SupplementIcon } from '../components/SupplementIcon';
 import { useTheme } from '../contexts/ThemeContext';
@@ -126,8 +128,8 @@ export const METRIC_REGISTRY: Record<MetricId, MetricDefinition> = {
     id: 'weekly',
     label: 'Weekly',
     icon: 'trophy',
-    color: '#10B981',
-    glowColor: '#34D399',
+    color: '#FBBF24',
+    glowColor: '#FCD34D',
     category: 'Fitness',
     description: 'Weekly sessions logged vs target',
   },
@@ -561,33 +563,13 @@ export default function OverallScreen() {
   );
   const targetsCompletedCount = activeRings.filter((r) => r.pct >= 1).length;
 
-  const todayFormatted = (() => {
-    try {
-      return new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        month: 'short',
-        day: 'numeric',
-      });
-    } catch {
-      return todayStr();
-    }
-  })();
-
   return (
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Today's Activities</Text>
-          <Text style={styles.headerSubtitle}>{todayFormatted}</Text>
-        </View>
+        <Text style={styles.headerTitle} numberOfLines={1}>Today's Activities</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={styles.scorePill}>
-            <View style={[styles.scoreDot, { backgroundColor: score >= 70 ? '#4ADE80' : score >= 40 ? '#FBBF24' : '#EF4444' }]} />
-            <Text style={[styles.scorePillTxt, { color: score >= 70 ? '#4ADE80' : score >= 40 ? '#FBBF24' : '#EF4444' }]}>
-              {score}%
-            </Text>
-          </View>
+          <ScoreBadge score={score} />
           <SettingsButton />
         </View>
       </View>
@@ -948,36 +930,8 @@ function makeStyles(C: any, isDark: boolean) {
       borderBottomColor: C.border,
     },
     headerTitle: {
-      fontSize: 22,
-      fontWeight: '900',
+      ...TITLE_COMPACT_STYLE,
       color: C.text,
-      letterSpacing: -0.3,
-    },
-    headerSubtitle: {
-      fontSize: 12,
-      color: C.muted,
-      fontWeight: '600',
-      marginTop: 2,
-    },
-    scorePill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 20,
-      backgroundColor: isDark ? '#111318' : '#F8FAFC',
-      borderWidth: 1,
-      borderColor: isDark ? '#1E1E26' : '#E2E8F0',
-    },
-    scoreDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      marginRight: 6,
-    },
-    scorePillTxt: {
-      fontSize: 15,
-      fontWeight: '900',
     },
     scroll: {
       padding: 16,
@@ -1018,14 +972,14 @@ function makeStyles(C: any, isDark: boolean) {
       paddingHorizontal: 10,
       paddingVertical: 5,
       borderRadius: 12,
-      backgroundColor: isDark ? 'rgba(74, 222, 128, 0.1)' : 'rgba(74, 222, 128, 0.15)',
+      backgroundColor: C.yellow + (isDark ? '1A' : '26'),
       borderWidth: 1,
-      borderColor: 'rgba(74, 222, 128, 0.25)',
+      borderColor: C.yellow + '40',
     },
     trackScoreBadgeTxt: {
       fontSize: 12,
       fontWeight: '800',
-      color: '#4ADE80',
+      color: C.yellow,
     },
     trackSvgWrap: {
       width: 280,

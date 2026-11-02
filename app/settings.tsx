@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Modal, TextInput, Image,
+  Modal, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -18,6 +18,8 @@ import { Card, SectionHeader, Btn, SelectBtn, PickerModal, Toggle } from '../com
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { HeaderBack } from '../components/HeaderBack';
+import { TITLE_STYLE } from '../constants/fonts';
+import { SheetScroll, SheetInput } from '../components/SheetKeyboard';
 import { RefreshScrollView } from '../components/PullToRefresh';
 
 // Option generators
@@ -263,6 +265,7 @@ export default function SettingsScreen() {
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setEditProfileVisible(false)}>
           <TouchableOpacity activeOpacity={1} style={[styles.editModalSheet, { backgroundColor: C.card }]} onPress={e => e.stopPropagation()}>
             <View style={styles.editModalHandle} />
+            <SheetScroll reserve={80}>
             <Text style={[styles.editModalTitle, { color: C.text }]}>Edit Profile</Text>
 
             <TouchableOpacity style={[styles.bigAvatarWrap]} onPress={pickProfileImage} activeOpacity={0.8}>
@@ -280,7 +283,7 @@ export default function SettingsScreen() {
             <Text style={[styles.editModalHint, { color: C.muted }]}>Tap photo to change</Text>
 
             <Text style={[styles.editModalLabel, { color: C.muted }]}>YOUR NAME</Text>
-            <TextInput
+            <SheetInput
               style={[styles.editNameInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : C.bg, color: C.text, borderColor: C.border }]}
               value={editNameText}
               onChangeText={setEditNameText}
@@ -293,6 +296,7 @@ export default function SettingsScreen() {
               <Ionicons name="checkmark-circle" size={18} color="#fff" />
               <Text style={styles.saveProfileBtnTxt}>Save Profile</Text>
             </TouchableOpacity>
+            </SheetScroll>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -303,7 +307,7 @@ export default function SettingsScreen() {
 function makeStyles(C: any, isDark: boolean) { return StyleSheet.create({
   safe:         { flex: 1, backgroundColor: C.bg },
   header:       { paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border },
-  headerTitle:  { fontSize: 22, fontWeight: '800', color: C.text },  scroll:       { padding: 16, paddingBottom: 40 },
+  headerTitle:  { ...TITLE_STYLE, color: C.text },  scroll:       { padding: 16, paddingBottom: 40 },
   section:      { padding: 16 },
 
   // Profile card

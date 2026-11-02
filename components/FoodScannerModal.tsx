@@ -10,7 +10,7 @@ import {
   useWindowDimensions, ActivityIndicator,
 } from 'react-native';
 import Animated, {
-  Easing, FadeIn, FadeInDown, FadeInUp, FadeOut, SlideInDown, SlideOutDown, ZoomIn, ZoomOut,
+  Easing, FadeIn, FadeInDown, FadeInUp, FadeOut, SlideInDown, SlideOutDown, ZoomIn,
   useAnimatedStyle, useSharedValue, withRepeat, withSequence, withSpring, withTiming, SharedValue,
 } from 'react-native-reanimated';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
@@ -170,7 +170,7 @@ export default function FoodScannerModal({ visible, onClose, onChanged }: {
     const n = name.trim() || item.name || 'Scanned food';
     // A barcode whose values were filled in or corrected scans right next time
     if (item.barcode && item.source === 'barcode') rememberBarcode({ ...item, name: n });
-    addFood(logName(n, p), p.protein, p.kcal);
+    addFood(logName(n, p), p.protein, p.kcal, undefined, { carbs: p.carbs, fat: p.fat });
     setSession(s => ({ count: s.count + 1, kcal: s.kcal + p.kcal }));
     setFlash(f => f + 1);
     setFlashOn(true);
@@ -240,7 +240,7 @@ export default function FoodScannerModal({ visible, onClose, onChanged }: {
 
             {/* Not found / couldn't read */}
             {phase === 'notfound' && notFound && (
-              <Animated.View entering={FadeInUp.springify().damping(18)} style={[styles.glassCard, { bottom: insets.bottom + 22 }]}>
+              <Animated.View entering={FadeInUp.duration(220).easing(Easing.out(Easing.cubic))} style={[styles.glassCard, { bottom: insets.bottom + 22 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Ionicons name="help-circle" size={20} color={C.orange} />
                   <Text style={styles.glassTitle}>{notFound.code ? 'Product not found' : 'Couldn\'t read it'}</Text>
@@ -307,7 +307,7 @@ export default function FoodScannerModal({ visible, onClose, onChanged }: {
           <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)}
             style={[StyleSheet.absoluteFill, styles.dim, { justifyContent: 'flex-start', paddingTop: insets.top + 90 }]}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setCodeEntry(null)} />
-            <Animated.View entering={ZoomIn.springify().damping(16)} exiting={ZoomOut.duration(120)}
+            <Animated.View entering={FadeInDown.duration(180).easing(Easing.out(Easing.cubic))} exiting={FadeOut.duration(120)}
               style={[styles.codeCard, { backgroundColor: C.card, borderColor: C.border }]}>
               <Text style={[styles.codeTitle, { color: C.text }]}>Enter the barcode</Text>
               <Text style={[styles.codeSub, { color: C.muted }]}>The digits under the bars</Text>
@@ -331,7 +331,7 @@ export default function FoodScannerModal({ visible, onClose, onChanged }: {
           </Animated.View>
         )}
         {phase === 'result' && item && (
-          <Animated.View entering={SlideInDown.springify().damping(20).stiffness(190)} exiting={SlideOutDown.duration(220)}
+          <Animated.View entering={SlideInDown.duration(260).easing(Easing.out(Easing.cubic))} exiting={SlideOutDown.duration(200)}
             style={[styles.sheet, {
               backgroundColor: C.card, borderColor: C.border, bottom: kb,
               maxHeight: H - insets.top - 40 - kb, paddingBottom: kb ? 12 : insets.bottom + 14,
@@ -468,8 +468,8 @@ function GlassAction({ icon, label, onPress, primary }: { icon: keyof typeof Ion
   const st = useAnimatedStyle(() => ({ transform: [{ scale: s.value }] }));
   return (
     <Pressable onPress={onPress}
-      onPressIn={() => { s.value = withSpring(0.9, { damping: 14, stiffness: 420 }); }}
-      onPressOut={() => { s.value = withSpring(1, { damping: 8, stiffness: 260 }); }}>
+      onPressIn={() => { s.value = withTiming(0.94, { duration: 90 }); }}
+      onPressOut={() => { s.value = withTiming(1, { duration: 140, easing: Easing.out(Easing.quad) }); }}>
       <Animated.View style={[styles.glassBtn, primary && { backgroundColor: C.accent, borderColor: C.accent }, st]}>
         <Ionicons name={icon} size={18} color="#fff" />
         <Text style={styles.glassBtnTxt}>{label}</Text>

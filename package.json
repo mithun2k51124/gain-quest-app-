@@ -11,6 +11,7 @@
     "build:ios": "eas build --platform ios"
   },
   "dependencies": {
+    "@expo-google-fonts/outfit": "^0.4.3",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-ml-kit/text-recognition": "^2.0.0",
     "@react-native-picker/picker": "2.11.4",

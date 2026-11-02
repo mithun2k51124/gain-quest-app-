@@ -2,7 +2,7 @@
 // ticked off once a day, each with an optional reminder (one or more times on chosen days).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, TextInput, Switch, Animated,
+  View, Text, TouchableOpacity, StyleSheet, Modal, Switch, Animated,
   KeyboardAvoidingView, Platform, Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +20,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { WheelPicker } from './WheelPicker';
+import { SheetScroll, SheetInput } from './SheetKeyboard';
 import { fmtTime } from './Reminders';
 
 export const SUPPLEMENT_COLORS = ['#14B8A6', '#8B5CF6', '#F59E0B', '#EC4899', '#3B82F6', '#22C55E'];
@@ -285,10 +286,9 @@ function SupplementEditor({ visible, supplement, presetName, colorIndex, reminde
             </View>
 
             {/* flexShrink lets the list scroll inside the sheet instead of pushing the buttons off screen */}
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled
-              style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
+            <SheetScroll nestedScrollEnabled style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
               <Text style={styles.label}>Name</Text>
-              <TextInput value={name} onChangeText={setName} placeholder="e.g. Vitamin D3" placeholderTextColor={C.muted}
+              <SheetInput value={name} onChangeText={setName} placeholder="e.g. Vitamin D3" placeholderTextColor={C.muted}
                 style={styles.input} maxLength={40} autoCapitalize="words" />
               {!supplement && (
                 <View style={[styles.quickWrap, { marginTop: 8 }]}>
@@ -378,7 +378,7 @@ function SupplementEditor({ visible, supplement, presetName, colorIndex, reminde
                 ))}
               </View>
               <View style={{ height: 6 }} />
-            </ScrollView>
+            </SheetScroll>
 
             <TouchableOpacity onPress={save} disabled={!trimmed} activeOpacity={0.85}
               style={[styles.saveBtn, { backgroundColor: color }, !trimmed && { opacity: 0.4 }]}>

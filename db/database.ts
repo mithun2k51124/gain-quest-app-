@@ -338,6 +338,11 @@ const MIGRATIONS: ((db: DbLike) => void)[] = [
         (day_of_week='Saturday' AND plan_name='Full Push' AND muscle_groups='Chest,Triceps,Shoulders') OR
         (day_of_week='Sunday' AND plan_name='Rest Day' AND muscle_groups='Rest'));
   `),
+  // v10: carbs and fat are saved with each food (older entries stay 0)
+  (db) => db.execSync(`
+    ALTER TABLE food_log ADD COLUMN carbs REAL NOT NULL DEFAULT 0;
+    ALTER TABLE food_log ADD COLUMN fat REAL NOT NULL DEFAULT 0;
+  `),
 ];
 
 function runMigrations(db: DbLike): void {
@@ -438,6 +443,36 @@ export function setSetting(key: string, value: string): void {
   getDb().runSync('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]);
 }
 
+// ── Skipped exercises ──────────────────────────────────────────────────────
+// The trash on a Log card skips that exercise for the day; the plan keeps it.
+// Stored as { date: [exercise names] }, trimmed to the last 60 days.
+const SKIP_KEY = 'skipped_exercises';
+
+function readSkips(): Record<string, string[]> {
+  try {
+    const parsed = JSON.parse(getSetting(SKIP_KEY, '{}'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Exercise names skipped on a day (today by default). */
+export function getSkippedExercises(logDate?: string): string[] {
+  return readSkips()[logDate || todayStr()] ?? [];
+}
+
+export function skipExerciseForDay(exerciseName: string, logDate?: string): void {
+  const d = logDate || todayStr();
+  const skips = readSkips();
+  skips[d] = [...new Set([...(skips[d] ?? []), exerciseName])];
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 60);
+  const oldest = toDateStr(cutoff);
+  for (const k of Object.keys(skips)) if (k < oldest) delete skips[k];
+  setSetting(SKIP_KEY, JSON.stringify(skips));
+}
+
 export interface DailyLog {
   id: number;
   log_date: string;
@@ -491,18 +526,25 @@ export interface FoodEntry {
   food_name: string;
   protein: number;
   calories: number;
+  carbs: number;
+  fat: number;
 }
 
 /** Logs a food and returns its id (so it can be taken back out). */
-export function addFood(foodName: string, protein: number, calories: number, logDate?: string): number {
+export function addFood(
+  foodName: string, protein: number, calories: number, logDate?: string,
+  macros: { carbs?: number; fat?: number } = {},
+): number {
   const db = getDb();
   const d = logDate || todayStr();
 
-  const { lastInsertRowId } = db.runSync('INSERT INTO food_log (log_date, food_name, protein, calories) VALUES (?, ?, ?, ?)', [
+  const { lastInsertRowId } = db.runSync('INSERT INTO food_log (log_date, food_name, protein, calories, carbs, fat) VALUES (?, ?, ?, ?, ?, ?)', [
     d,
     foodName,
     protein,
     calories,
+    macros.carbs ?? 0,
+    macros.fat ?? 0,
   ]);
   db.runSync('INSERT OR IGNORE INTO daily_logs (log_date) VALUES (?)', [d]);
   db.runSync(
@@ -514,9 +556,9 @@ export function addFood(foodName: string, protein: number, calories: number, log
 }
 
 /** Foods logged lately (newest first, each name once), for one-tap logging again. */
-export function getRecentFoods(limit = 12): { food_name: string; protein: number; calories: number }[] {
-  return getDb().getAllSync<{ food_name: string; protein: number; calories: number }>(
-    `SELECT f.food_name, f.protein, f.calories FROM food_log f
+export function getRecentFoods(limit = 12): { food_name: string; protein: number; calories: number; carbs: number; fat: number }[] {
+  return getDb().getAllSync<{ food_name: string; protein: number; calories: number; carbs: number; fat: number }>(
+    `SELECT f.food_name, f.protein, f.calories, f.carbs, f.fat FROM food_log f
      JOIN (SELECT food_name, MAX(id) AS id FROM food_log GROUP BY food_name) last ON last.id = f.id
      ORDER BY f.id DESC LIMIT ?`,
     [limit]
@@ -526,6 +568,14 @@ export function getRecentFoods(limit = 12): { food_name: string; protein: number
 export function getFoodLog(logDate?: string): FoodEntry[] {
   const d = logDate || todayStr();
   return getDb().getAllSync<FoodEntry>('SELECT * FROM food_log WHERE log_date=? ORDER BY logged_at ASC', [d]);
+}
+
+/** A day's carbs and fat in grams, summed from its food log. */
+export function getMacroTotals(logDate?: string): { carbs: number; fat: number } {
+  const r = getDb().getFirstSync<{ carbs: number | null; fat: number | null }>(
+    'SELECT SUM(carbs) as carbs, SUM(fat) as fat FROM food_log WHERE log_date=?', [logDate || todayStr()]
+  );
+  return { carbs: r?.carbs ?? 0, fat: r?.fat ?? 0 };
 }
 
 export function deleteFoodEntry(id: number): void {
@@ -1207,34 +1257,81 @@ export interface Streak {
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
- * Consecutive workout days ending today. Today only counts once trained (it
- * never breaks the streak while the day is still in progress), and days the
- * weekly plan marks as 'Rest' are skipped without breaking it.
+ * Every date a workout was logged, the exercises planned per weekday (not 'Rest' days) and the
+ * exercises skipped per date.
  */
-function computeCurrentStreak(db: DbLike): number {
-  const rows = db.getAllSync<{ log_date: string }>(
-    'SELECT log_date FROM daily_logs WHERE workout_completed=1 ORDER BY log_date ASC'
-  );
-  if (!rows.length) return 0;
-  const done = new Set(rows.map(r => r.log_date));
-  const earliest = rows[0].log_date;
-
+function streakInputs(db: DbLike): {
+  done: Set<string>; earliest: string | null; planned: Map<string, string[]>; skips: Record<string, string[]>;
+} {
+  const dates = db.getAllSync<{ d: string }>(`
+    SELECT DISTINCT session_date as d FROM workout_sessions
+    UNION SELECT DISTINCT session_date as d FROM exercise_logs
+    UNION SELECT DISTINCT log_date as d FROM daily_logs WHERE workout_completed = 1
+    ORDER BY d ASC
+  `).map(r => r.d).filter(Boolean);
   const restDays = new Set(
     db.getAllSync<{ day_of_week: string }>("SELECT day_of_week FROM workout_plans WHERE muscle_groups='Rest'")
       .map(r => r.day_of_week)
   );
+  const planned = new Map<string, string[]>();
+  for (const r of db.getAllSync<{ day_of_week: string; exercise_name: string }>(
+    'SELECT day_of_week, exercise_name FROM workout_plan_exercises'
+  )) {
+    if (restDays.has(r.day_of_week)) continue;
+    planned.set(r.day_of_week, [...(planned.get(r.day_of_week) ?? []), r.exercise_name]);
+  }
+  return { done: new Set(dates), earliest: dates[0] ?? null, planned, skips: readSkips() };
+}
 
+export type StreakDayStatus = 'done' | 'rest' | 'missed' | 'pending' | 'future' | 'none';
+
+/**
+ * How a day counts for the streak: trained ('done'), a rest day, a day with nothing planned or
+ * one whose every exercise was skipped with the trash ('rest' — keeps the streak), a planned day
+ * with nothing logged ('missed' — breaks it), today still to train ('pending').
+ * Days before the first ever workout are 'none'.
+ */
+function streakDayStatus(d: Date, inputs: ReturnType<typeof streakInputs>): StreakDayStatus {
+  const ds = toDateStr(d);
+  const today = todayStr();
+  if (ds > today) return 'future';
+  if (inputs.done.has(ds)) return 'done';
+  if (!inputs.earliest || ds < inputs.earliest) return 'none';
+  const planned = inputs.planned.get(DAY_NAMES[d.getDay()]) ?? [];
+  const skipped = new Set(inputs.skips[ds] ?? []);
+  if (planned.every(name => skipped.has(name))) return 'rest';
+  return ds === today ? 'pending' : 'missed';
+}
+
+/**
+ * Consecutive streak days ending today. Trained days and rest/unplanned days both count;
+ * only a planned day with nothing logged breaks it. Today never breaks it while in progress.
+ */
+function computeCurrentStreak(db: DbLike): number {
+  const inputs = streakInputs(db);
+  if (!inputs.earliest) return 0;
   let current = 0;
   const cursor = new Date();
-  if (done.has(toDateStr(cursor))) current++;
   for (;;) {
+    const status = streakDayStatus(cursor, inputs);
+    if (status === 'done' || status === 'rest') current++;
+    else if (status !== 'pending') break;
     cursor.setDate(cursor.getDate() - 1);
-    const ds = toDateStr(cursor);
-    if (ds < earliest) break;
-    if (done.has(ds)) current++;
-    else if (!restDays.has(DAY_NAMES[cursor.getDay()])) break;
   }
   return current;
+}
+
+/** Monday → Sunday streak status for each day of this week (Home's Overview). */
+export function getStreakWeek(): { days: StreakDayStatus[]; todayIndex: number } {
+  const inputs = streakInputs(getDb());
+  const now = new Date();
+  const todayIndex = (now.getDay() + 6) % 7;
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now);
+    d.setDate(now.getDate() - todayIndex + i);
+    return streakDayStatus(d, inputs);
+  });
+  return { days, todayIndex };
 }
 
 export function getStreak(): Streak {
@@ -1307,6 +1404,8 @@ export function getLastNDaysLogs(n = 30): DailyLog[] {
 
 export function resetDatabase(): void {
   const db = getDb();
+  // The theme is a phone preference, not app data: it survives a reset
+  const darkMode = getSetting('dark_mode', 'false');
   db.execSync(`
     DROP TABLE IF EXISTS daily_logs;
     DROP TABLE IF EXISTS food_log;
@@ -1333,6 +1432,7 @@ export function resetDatabase(): void {
   `);
   // user_version is reset so migrations re-apply on top of the fresh baseline tables
   initializeDatabase();
+  setSetting('dark_mode', darkMode);
 }
 
 /** Every stored progress photo file, so callers can delete them alongside a reset. */

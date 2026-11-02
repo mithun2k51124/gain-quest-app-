@@ -23,6 +23,7 @@ import { Card, SectionHeader, ProgressBar, MuscleTag } from '../components/ui';
 import { RefreshScrollView } from '../components/PullToRefresh';
 import BodyAnatomy from '../components/BodyAnatomy';
 import { SettingsButton } from '../components/SettingsButton';
+import { TITLE_STYLE } from '../constants/fonts';
 import { HeaderBack } from '../components/HeaderBack';
 import { NutritionTrend } from '../components/NutritionTrend';
 import { useTheme } from '../contexts/ThemeContext';
@@ -1651,7 +1652,7 @@ function makeStyles(C: any, isDark: boolean) {
   return StyleSheet.create({
     safe:          { flex: 1, backgroundColor: C.bg },
     header:        { paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border },
-    headerTitle:   { fontSize: 22, fontWeight: '800', color: C.text },
+    headerTitle:   { ...TITLE_STYLE, color: C.text },
     tabBar:        { flexDirection: 'row', backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border },
     tabBtn:        { flex: 1, paddingVertical: 12, alignItems: 'center' },
     tabActive:     { borderBottomWidth: 2, borderBottomColor: C.accent },

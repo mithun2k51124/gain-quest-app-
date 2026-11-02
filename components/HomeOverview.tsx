@@ -1,26 +1,26 @@
 // components/HomeOverview.tsx — Home's Overview widget: the workout streak and this week's
-// training days, in one compact card.
+// days, in one compact card. Trained days burn, missed days get an X, rest days keep the streak.
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
 import { FireIcon } from './FireIcon';
+import { FireDot, MissedDot, RestDot, FLAME } from './StreakDots';
+import type { StreakDayStatus } from '../db/database';
 
 const WEEK_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-const FLAME = '#FF6B35';
 
 export interface OverviewData {
   streak: number;
   bestStreak: number;
-  weekTrained: boolean[];      // Monday → Sunday
-  todayIndex: number;          // 0 = Monday
+  weekDays: StreakDayStatus[];  // Monday → Sunday
+  todayIndex: number;           // 0 = Monday
 }
 
 export function HomeOverview({ data }: { data: OverviewData }) {
   const { C } = useTheme();
   const styles = makeStyles(C);
   const best = Math.max(data.bestStreak, data.streak);
-  const trainedThisWeek = data.weekTrained.filter(Boolean).length;
+  const trainedThisWeek = data.weekDays.filter(s => s === 'done').length;
 
   return (
     <View style={styles.card}>
@@ -39,18 +39,20 @@ export function HomeOverview({ data }: { data: OverviewData }) {
       </View>
       <View style={styles.week}>
         {WEEK_LETTERS.map((l, i) => {
-          const trained = data.weekTrained[i];
+          const status = data.weekDays[i] ?? 'future';
           const today = i === data.todayIndex;
-          const future = i > data.todayIndex;
           return (
             <View key={i} style={styles.weekCol}>
-              <View style={[
-                styles.weekDot,
-                trained ? { backgroundColor: FLAME, borderColor: FLAME } : { borderColor: future ? C.border : C.muted + '66' },
-                today && !trained && { borderColor: FLAME, borderWidth: 2 },
-              ]}>
-                {trained && <Ionicons name="checkmark" size={11} color="#fff" />}
-              </View>
+              {status === 'done' ? <FireDot delay={i * 70} />
+                : status === 'missed' ? <MissedDot color={C.red} delay={i * 70} />
+                : status === 'rest' ? <RestDot />
+                : (
+                  <View style={[
+                    styles.weekDot,
+                    { borderColor: status === 'future' ? C.border : C.muted + '66' },
+                    today && { borderColor: FLAME, borderWidth: 2 },
+                  ]} />
+                )}
               <Text style={[styles.weekLetter, today && { color: C.text }]}>{l}</Text>
             </View>
           );

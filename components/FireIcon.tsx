@@ -19,7 +19,9 @@ function Spark({ size, delay, x }: { size: number; delay: number; x: number }) {
     opacity: t.value < 0.1 ? t.value * 8 : 0.8 * (1 - t.value),
     transform: [{ translateY: -t.value * size * 0.75 }, { translateX: Math.sin(t.value * 6) * 2 }, { scale: 1 - t.value * 0.6 }],
   }));
-  return <Animated.View style={[styles.spark, { left: size / 2 + x, top: size * 0.3 }, style]} />;
+  // Sparks scale with the icon (3 px at 24 px), so a small flame looks the same as a big one
+  const d = Math.max(1.5, size / 8);
+  return <Animated.View style={[styles.spark, { left: size / 2 + x * size / 24, top: size * 0.3, width: d, height: d, borderRadius: d / 2 }, style]} />;
 }
 
 export function FireIcon({ size = 24 }: { size?: number }) {
@@ -88,5 +90,5 @@ export function FireIcon({ size = 24 }: { size?: number }) {
 const styles = StyleSheet.create({
   base:  { transformOrigin: 'bottom' },
   glow:  { position: 'absolute', backgroundColor: '#FF6B35' },
-  spark: { position: 'absolute', width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#FFC046' },
+  spark: { position: 'absolute', backgroundColor: '#FFC046' },
 });

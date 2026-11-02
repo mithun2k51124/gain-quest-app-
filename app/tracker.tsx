@@ -30,6 +30,7 @@ import {
 } from '../db/database';
 import { Card, Btn, ProgressBar, Ring, PickerModal, SectionHeader } from '../components/ui';
 import { SettingsButton } from '../components/SettingsButton';
+import { TITLE_COMPACT_STYLE } from '../constants/fonts';
 import { DragBoard, DragBoardHandle, WidgetLabel } from '../components/DragWidget';
 import { SupplementsCard } from '../components/Supplements';
 import { WeightCard } from '../components/WeightTracker';
@@ -320,6 +321,17 @@ export default function TrackerScreen() {
             </View>
           </View>
 
+          {/* Carbs and fat have no goal, so they're plain totals */}
+          <View style={styles.macroRow}>
+            {([['Carbs', foods.reduce((n, f) => n + (f.carbs || 0), 0), C.carbs],
+               ['Fat', foods.reduce((n, f) => n + (f.fat || 0), 0), C.fat]] as const).map(([label, grams, color]) => (
+              <View key={label} style={[styles.macroChip, { borderColor: color + '55', backgroundColor: color + '14' }]}>
+                <Text style={[styles.macroChipVal, { color }]}>{Math.round(grams)} g</Text>
+                <Text style={styles.nutritionLabel}>{label}</Text>
+              </View>
+            ))}
+          </View>
+
           <Btn
             label="+ Add Food / Search"
             color={C.calories}
@@ -336,6 +348,8 @@ export default function TrackerScreen() {
                       <Text style={{ color: C.protein }}>{f.protein}g protein</Text>
                       {'  '}
                       <Text style={{ color: C.calories }}>{f.calories} kcal</Text>
+                      {f.carbs > 0 && <Text style={{ color: C.carbs }}>{'  '}{Math.round(f.carbs * 10) / 10}g carbs</Text>}
+                      {f.fat > 0 && <Text style={{ color: C.fat }}>{'  '}{Math.round(f.fat * 10) / 10}g fat</Text>}
                     </Text>
                   </View>
 
@@ -477,16 +491,7 @@ export default function TrackerScreen() {
     <SafeAreaView style={styles.safe}>
       {/* ── Header ── */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Daily Tracker</Text>
-          <Text style={styles.headerDate}>
-            {new Date().toLocaleDateString('en-US', {
-              weekday: 'short',
-              month: 'short',
-              day: 'numeric',
-            })}
-          </Text>
-        </View>
+        <Text style={styles.headerTitle} numberOfLines={1}>Daily Tracker</Text>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {/* Barcode & nutrition-label scanner */}
@@ -656,8 +661,7 @@ function makeStyles(C: any, isDark?: boolean) {
       borderBottomWidth: 1,
       borderBottomColor: C.border,
     },
-    headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
-    headerDate: { fontSize: 12, color: C.muted },
+    headerTitle: { ...TITLE_COMPACT_STYLE, color: C.text },
     scanPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 38, borderRadius: 12, borderWidth: 1 },
     scanTxt: { fontSize: 13, fontWeight: '900', color: '#22C55E', lineHeight: 15 },
     scanSub: { fontSize: 9, fontWeight: '700', color: C.muted, lineHeight: 11 },
@@ -894,6 +898,9 @@ function makeStyles(C: any, isDark?: boolean) {
     nutritionStat: { alignItems: 'center', gap: 6 },
     nutritionVal: { fontSize: 18, fontWeight: '800' },
     nutritionLabel: { fontSize: 11, color: C.muted },
+    macroRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+    macroChip: { flex: 1, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
+    macroChipVal: { fontSize: 15, fontWeight: '800' },
     foodList: { marginTop: 12, borderTopWidth: 1, borderTopColor: C.border },
     foodRow: {
       flexDirection: 'row',

@@ -14,6 +14,8 @@ import AIWorkoutLogger from '../components/AIWorkoutLogger';
 import { AnimatedTabBar, TabDef } from '../components/AnimatedTabBar';
 import { initReminders, onReminderTap } from '../utils/reminders';
 import { isSwipeLocked } from '../utils/swipeLock';
+import { useFonts } from 'expo-font';
+import { FONT_ASSETS } from '../constants/fonts';
 
 // Swipe order = tab bar order
 const TAB_ROUTES = [
@@ -40,7 +42,7 @@ const TAB_DEFS: TabDef[] = [
   { name: 'workouts', label: 'Workouts', icon: 'barbell-outline',     activeIcon: 'barbell',     colorKey: 'purple' },
   { name: 'tracker',  label: 'Tracker',  icon: 'clipboard-outline',   activeIcon: 'clipboard',   colorKey: 'teal' },
   { name: 'prs',      label: 'PRs',      icon: 'trophy-outline',      activeIcon: 'trophy',      colorKey: 'orange' },
-  { name: 'overall',  label: 'Overall',  icon: 'speedometer-outline', activeIcon: 'speedometer', colorKey: 'green' },
+  { name: 'overall',  label: 'Overall',  icon: 'speedometer-outline', activeIcon: 'speedometer', colorKey: 'yellow' },
 ];
 
 export default function RootLayout() {
@@ -58,6 +60,8 @@ function RootLayoutInner() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // Headings fall back to the system font if Outfit fails to load, so never block on an error
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -135,7 +139,7 @@ function RootLayoutInner() {
     );
   }
 
-  if (!ready) {
+  if (!ready || (!fontsLoaded && !fontError)) {
     return (
       <View style={{ flex:1, backgroundColor: C.bg, alignItems:'center', justifyContent:'center' }}>
         <Text style={{ fontSize: 64 }}>🏋️</Text>

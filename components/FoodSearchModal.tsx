@@ -25,7 +25,7 @@ import { PillSwitch } from './PillSwitch';
 import { ScanIcon } from './ScanIcon';
 
 interface Added { id: number; name: string; kcal: number; protein: number }
-type Recent = { food_name: string; protein: number; calories: number };
+type Recent = { food_name: string; protein: number; calories: number; carbs: number; fat: number };
 type Tab = 'search' | 'manual';
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -104,8 +104,8 @@ export default function FoodSearchModal({ visible, onClose, onChanged, onOpenSca
     setTab(t);
   };
 
-  const logIt = (name: string, kcal: number, protein: number) => {
-    const id = addFood(name, r1(protein), Math.round(kcal));
+  const logIt = (name: string, kcal: number, protein: number, carbs = 0, fat = 0) => {
+    const id = addFood(name, r1(protein), Math.round(kcal), undefined, { carbs: r1(carbs), fat: r1(fat) });
     setAdded(a => [...a, { id, name, kcal: Math.round(kcal), protein: r1(protein) }]);
     refreshToday();
     onChanged();
@@ -128,7 +128,7 @@ export default function FoodSearchModal({ visible, onClose, onChanged, onOpenSca
   };
   const addPicked = (p: Portion, name: string) => {
     if (!picked) return;
-    logIt(logName(name || picked.name, p), p.kcal, p.protein);
+    logIt(logName(name || picked.name, p), p.kcal, p.protein, p.carbs, p.fat);
     setPicked(null);
   };
 
@@ -142,7 +142,7 @@ export default function FoodSearchModal({ visible, onClose, onChanged, onOpenSca
     const grams = mNum(mGrams);
     const name = mName.trim() || 'Food';
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    logIt(grams ? `${name} · ${fmtNum(grams)} g` : name, mKcal, mMacros.protein);
+    logIt(grams ? `${name} · ${fmtNum(grams)} g` : name, mKcal, mMacros.protein, mMacros.carbs, mMacros.fat);
     setMName(''); setMGrams(''); setMVals({ kcal: '', protein: '', carbs: '', fat: '' });
   };
 
@@ -200,8 +200,8 @@ export default function FoodSearchModal({ visible, onClose, onChanged, onOpenSca
                 {recent.map((r, i) => (
                   <FoodRow key={r.food_name} index={i} name={r.food_name} kcal={r.calories}
                     detail={`${fmtNum(r.protein)} g protein`} icon="time-outline" tint={C.accent}
-                    onPress={() => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); logIt(r.food_name, r.calories, r.protein); }}
-                    onQuickAdd={() => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); logIt(r.food_name, r.calories, r.protein); }} />
+                    onPress={() => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); logIt(r.food_name, r.calories, r.protein, r.carbs, r.fat); }}
+                    onQuickAdd={() => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); logIt(r.food_name, r.calories, r.protein, r.carbs, r.fat); }} />
                 ))}
               </Section>
             )}

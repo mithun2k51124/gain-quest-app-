@@ -21,6 +21,9 @@ import { isBodyweightExercise, loadTypeOf } from '../constants/equipment';
 import { findExercise, MUSCLE_GROUP_ORDER } from '../constants/exerciseCatalog';
 import { WheelPicker } from '../components/WheelPicker';
 import { SettingsButton } from '../components/SettingsButton';
+import { TrophyBadge } from '../components/HeaderBadges';
+import { SheetScroll, SheetInput } from '../components/SheetKeyboard';
+import { TITLE_STYLE, SUBTITLE_STYLE } from '../constants/fonts';
 import { ExerciseGuideButton } from '../components/ExerciseGuide';
 import { RefreshScrollView } from '../components/PullToRefresh';
 
@@ -547,7 +550,10 @@ export default function PRScreen() {
           <Text style={styles.title}>Personal Records</Text>
           <Text style={styles.subtitle}>{prs.length} lifts · {pinnedPRs.length} pinned</Text>
         </View>
-        <SettingsButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <TrophyBadge />
+          <SettingsButton />
+        </View>
       </View>
 
       <RefreshScrollView
@@ -923,7 +929,7 @@ export default function PRScreen() {
               )}
 
               {step === 'create' && (
-                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <SheetScroll reserve={90}>
                   <View style={styles.sheetHead}>
                     <TouchableOpacity onPress={() => setStep('pick')} hitSlop={HIT} style={styles.iconBtn}>
                       <Ionicons name="arrow-back" size={18} color={C.text} />
@@ -931,7 +937,7 @@ export default function PRScreen() {
                     <Text style={[styles.sheetTitle, { marginLeft: 10 }]}>New exercise</Text>
                   </View>
                   <Text style={styles.label}>Name</Text>
-                  <TextInput style={styles.input} value={newName} onChangeText={setNewName} autoFocus
+                  <SheetInput style={styles.input} value={newName} onChangeText={setNewName} autoFocus
                     placeholder="e.g. Weighted Pull Up" placeholderTextColor={C.muted} autoCapitalize="words" />
                   <Text style={styles.label}>Measured by</Text>
                   <View style={styles.segment}>
@@ -963,11 +969,11 @@ export default function PRScreen() {
                   <TouchableOpacity style={[styles.primaryBtn, { alignSelf: 'stretch', marginTop: 20 }]} onPress={createExercise} activeOpacity={0.85}>
                     <Text style={styles.primaryTxt}>Continue</Text>
                   </TouchableOpacity>
-                </ScrollView>
+                </SheetScroll>
               )}
 
               {step === 'form' && (
-                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <SheetScroll reserve={90}>
                   <View style={styles.sheetHead}>
                     <Text style={[styles.sheetTitle, { flex: 1 }]}>{editId != null ? 'Edit entry' : 'Log PR'}</Text>
                     {editId != null && (
@@ -1012,13 +1018,13 @@ export default function PRScreen() {
                       <>
                         {!isReps && (
                           <>
-                            <TextInput style={styles.typeInput} value={weightText} onChangeText={onWeightText}
+                            <SheetInput style={styles.typeInput} value={weightText} onChangeText={onWeightText}
                               keyboardType="decimal-pad" maxLength={6} selectTextOnFocus autoFocus placeholder="0" placeholderTextColor={C.muted} />
                             <Text style={styles.wheelUnit}>kg</Text>
                             <Text style={styles.wheelTimes}>×</Text>
                           </>
                         )}
-                        <TextInput style={styles.typeInput} value={repsText} onChangeText={onRepsText}
+                        <SheetInput style={styles.typeInput} value={repsText} onChangeText={onRepsText}
                           keyboardType="number-pad" maxLength={3} selectTextOnFocus autoFocus={isReps} placeholder="0" placeholderTextColor={C.muted} />
                         <Text style={styles.wheelUnit}>reps</Text>
                       </>
@@ -1057,7 +1063,7 @@ export default function PRScreen() {
                     <Ionicons name={editId != null ? 'checkmark' : 'trophy'} size={16} color="#fff" />
                     <Text style={styles.primaryTxt}>{editId != null ? 'Save changes' : 'Save entry'}</Text>
                   </TouchableOpacity>
-                </ScrollView>
+                </SheetScroll>
               )}
             </TouchableOpacity>
           </TouchableOpacity>
@@ -1071,8 +1077,8 @@ function makeStyles(C: any) {
   return StyleSheet.create({
     safe:        { flex: 1, backgroundColor: C.bg },
     header:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12 },
-    title:       { fontSize: 24, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
-    subtitle:    { fontSize: 12, color: C.muted, marginTop: 2, fontWeight: '600' },
+    title:       { ...TITLE_STYLE, color: C.text },
+    subtitle:    { ...SUBTITLE_STYLE, color: C.muted },
     addBtn:      { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.accent, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
     addBtnTxt:   { color: '#fff', fontWeight: '800', fontSize: 13 },
     logCard:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12, padding: 14, borderRadius: 18, backgroundColor: C.accent + '12', borderWidth: 1, borderColor: C.accent + '40' },

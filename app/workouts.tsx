@@ -37,6 +37,8 @@ import {
   updateDailyLog,
   updateStreak,
   todayStr,
+  getSkippedExercises,
+  skipExerciseForDay,
   WorkoutPlan,
   WorkoutPlanExercise,
   MuscleEntry,
@@ -49,6 +51,8 @@ import { findExercise } from '../constants/exerciseCatalog';
 import { SplitWizard, SplitCard, getSplitConfig, targetFor, targetText, targetSentence, withKg } from '../components/SplitWizard';
 import { WheelPicker } from '../components/WheelPicker';
 import { SettingsButton } from '../components/SettingsButton';
+import { StreakBadge } from '../components/HeaderBadges';
+import { TITLE_STYLE } from '../constants/fonts';
 import { SegmentTabs, SegmentDef } from '../components/SegmentTabs';
 import { PullToRefresh } from '../components/PullToRefresh';
 import { SetSession } from '../components/SetSession';
@@ -78,6 +82,12 @@ function isDateStr(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const d = new Date(`${s}T00:00:00`);
   return !isNaN(d.getTime()) && toDateStr(d) === s;
+}
+/** Today's planned exercises, minus any skipped with the trash on their Log card. */
+function todaysPlan(): WorkoutPlanExercise[] {
+  const skipped = new Set(getSkippedExercises());
+  return getWorkoutPlanExercises(new Date().toLocaleDateString('en-US', { weekday: 'long' }))
+    .filter(e => !skipped.has(e.exercise_name));
 }
 
 /** One logged set as the Log tab shows it. */
@@ -736,7 +746,7 @@ function ExerciseLogCard({
             </TouchableOpacity>
           )}
           {onDelete && (
-            <TouchableOpacity onPress={onDelete} style={{ padding: 4, marginLeft: 4 }}>
+            <TouchableOpacity onPress={onDelete} style={{ padding: 4, marginLeft: 4 }} accessibilityLabel="Skip for today">
               <Ionicons name="trash-outline" size={20} color={C.red} />
             </TouchableOpacity>
           )}
@@ -927,6 +937,7 @@ export default function WorkoutsScreen() {
   const [recentLogs, setRecentLogs] = useState<ExerciseLog[]>([]);  // last 4 weeks, for the Muscles tab
 
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [streakKey, setStreakKey] = useState(0); // refreshes the header streak after a first set is logged
   const [sessionDate, setSessionDateState] = useState(todayStr());
   const [sessionNotes, setSessionNotes] = useState('');
   // Sets logged on the session's date, read from the database: they're still there after a restart
@@ -964,8 +975,7 @@ export default function WorkoutsScreen() {
     setSessions(getWorkoutSessions(-1));  // all of them: the History calendar can reach any day
     setRecentLogs(getExerciseLogsSince(daysAgoStr(27)));
     
-    const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-    setTodaysExercises(getWorkoutPlanExercises(dayName));
+    setTodaysExercises(todaysPlan());
 
     // The screen stays open across midnight: the next morning's sets belong to the new day
     let date = sessionDateRef.current;
@@ -982,7 +992,7 @@ export default function WorkoutsScreen() {
   const loadPlan = useCallback(() => {
     setPlans(getWorkoutPlans());
     setPlanExercises(getWorkoutPlanExercises());
-    setTodaysExercises(getWorkoutPlanExercises(new Date().toLocaleDateString('en-US', { weekday: 'long' })));
+    setTodaysExercises(todaysPlan());
   }, []);
 
   useFocusEffect(
@@ -1031,6 +1041,7 @@ export default function WorkoutsScreen() {
       // Any day with a logged set is a training day, a past one included (streaks, History)
       updateDailyLog(sessionDate, { workout_completed: 1 });
       updateStreak();
+      setStreakKey(k => k + 1);
     }
 
     const { isNewPR, oldPR, new1RM } = checkPRForLog(exName, s, r, w);
@@ -1069,7 +1080,10 @@ export default function WorkoutsScreen() {
     <SafeAreaView style={styles.safe}>
       <View style={[styles.header, styles.headerRow]}>
         <Text style={styles.headerTitle}>Workouts</Text>
-        <SettingsButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <StreakBadge refreshKey={streakKey} />
+          <SettingsButton />
+        </View>
       </View>
 
       <View style={styles.tabBar}>
@@ -1306,7 +1320,13 @@ export default function WorkoutsScreen() {
                           loggedSets={exercises}
                           expandAll={viewAll}
                           onLog={(exName, s, r, w) => addExerciseSet(exName, muscle, s, r, w)}
-                          onDelete={(id) => setTodaysExercises(prev => prev.filter(e => e.id !== id))}
+                          onDelete={(id) => {
+                            // Skips it for today only; the plan keeps it
+                            const ex = todaysExercises.find(e => e.id === id);
+                            if (ex) skipExerciseForDay(ex.exercise_name);
+                            setTodaysExercises(prev => prev.filter(e => e.id !== id));
+                            setStreakKey(k => k + 1);
+                          }}
                         />
                       ))}
                     </>
@@ -1846,7 +1866,7 @@ function makeStyles(C: any) { return StyleSheet.create({
     borderBottomColor: C.border,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
+  headerTitle: { ...TITLE_STYLE, color: C.text },
   tabBar: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 2, backgroundColor: C.bg },
   scroll: { padding: 16, paddingBottom: 40 },
   section: { padding: 16 },

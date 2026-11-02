@@ -26,9 +26,10 @@ import {
   setSetting,
   getWorkoutPlanExercises,
   getExercisesForDate,
-  getWorkoutDates,
-  toDateStr,
+  getStreakWeek,
+  getSkippedExercises,
   todayStr,
+  StreakDayStatus,
   DailyLog,
   Goals,
   Streak,
@@ -36,6 +37,8 @@ import {
 } from '../db/database';
 import { Card, ProgressBar, MuscleTag, SectionHeader } from '../components/ui';
 import { SettingsButton } from '../components/SettingsButton';
+import { SheetScroll, SheetInput } from '../components/SheetKeyboard';
+import { TITLE_STYLE, SUBTITLE_STYLE } from '../constants/fonts';
 import { HeaderIconButton } from '../components/HeaderIconButton';
 import { HomeOverview, OverviewData } from '../components/HomeOverview';
 import { BatteryMeter } from '../components/BatteryMeter';
@@ -74,28 +77,14 @@ const WIDGET_INFO: Record<HomeSectionKey, { title: string; icon: string }> = {
   library:     { title: 'Exercise Library', icon: 'book-outline' },
 };
 
-/** Monday → Sunday: whether a workout was logged on each day of this week. */
-function weekTrained(): { days: boolean[]; todayIndex: number } {
-  const now = new Date();
-  const todayIndex = (now.getDay() + 6) % 7;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - todayIndex);
-  const trained = new Set(getWorkoutDates());
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return trained.has(toDateStr(d));
-  });
-  return { days, todayIndex };
-}
-
 /**
  * Today's planned exercises and how many are finished: every target set logged (one set
  * when the exercise has no split target).
  */
 function todaysWorkoutProgress(): { done: number; total: number } {
   const day = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-  const planned = getWorkoutPlanExercises(day);
+  const skipped = new Set(getSkippedExercises());
+  const planned = getWorkoutPlanExercises(day).filter(p => !skipped.has(p.exercise_name));
   const logged = getExercisesForDate(todayStr());
   const cfg = getSplitConfig();
   const setsOf = (name: string) =>
@@ -116,7 +105,7 @@ export default function DashboardScreen() {
   const [weight, setWeight] = useState<number | null>(null);
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
   const [weekly, setWeekly] = useState<any>(null);
-  const [week, setWeek] = useState<{ days: boolean[]; todayIndex: number }>({ days: [], todayIndex: 0 });
+  const [week, setWeek] = useState<{ days: StreakDayStatus[]; todayIndex: number }>({ days: [], todayIndex: 0 });
   const [hasPlan, setHasPlan] = useState(true);
 
   // Body weight popup
@@ -173,7 +162,7 @@ export default function DashboardScreen() {
     setWeight(getLatestWeight());
     setPlan(getTodaysPlan());
     setWeekly(getWeeklyStats());
-    setWeek(weekTrained());
+    setWeek(getStreakWeek());
     // A plan exists once a split was built or any exercise was put in the planner
     setHasPlan(!!getSplitConfig() || getWorkoutPlanExercises().length > 0);
   }, []);
@@ -459,7 +448,7 @@ export default function DashboardScreen() {
   const overview: OverviewData = {
     streak: streak?.current_streak ?? 0,
     bestStreak: streak?.longest_streak ?? 0,
-    weekTrained: week.days,
+    weekDays: week.days,
     todayIndex: week.todayIndex,
   };
 
@@ -828,6 +817,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
 
+            <SheetScroll reserve={170}>
             {/* Target 1: Water */}
             <View style={[styles.targetInputCard, { backgroundColor: C.card, borderColor: C.border }]}>
               <View style={styles.targetCardHeader}>
@@ -844,7 +834,7 @@ export default function DashboardScreen() {
                 >
                   <Ionicons name="remove" size={16} color={C.text} />
                 </TouchableOpacity>
-                <TextInput
+                <SheetInput
                   style={[styles.targetInput, { color: C.water, borderColor: C.water + '50' }]}
                   value={waterGoalInput}
                   onChangeText={v => setGoalInput('water_goal', v)}
@@ -880,7 +870,7 @@ export default function DashboardScreen() {
                 >
                   <Ionicons name="remove" size={16} color={C.text} />
                 </TouchableOpacity>
-                <TextInput
+                <SheetInput
                   style={[styles.targetInput, { color: C.protein, borderColor: C.protein + '50' }]}
                   value={proteinGoalInput}
                   onChangeText={v => setGoalInput('protein_goal', v)}
@@ -916,7 +906,7 @@ export default function DashboardScreen() {
                 >
                   <Ionicons name="remove" size={16} color={C.text} />
                 </TouchableOpacity>
-                <TextInput
+                <SheetInput
                   style={[styles.targetInput, { color: C.calories, borderColor: C.calories + '50' }]}
                   value={calorieGoalInput}
                   onChangeText={v => setGoalInput('calorie_goal', v)}
@@ -939,6 +929,7 @@ export default function DashboardScreen() {
             <TouchableOpacity onPress={closeGoalsModal} style={styles.glassDoneBtn}>
               <Text style={[styles.glassdoneTxt, { color: C.text }]}>Done</Text>
             </TouchableOpacity>
+            </SheetScroll>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -1015,8 +1006,8 @@ function makeStyles(C: any, isDark?: boolean) {
       borderBottomWidth: 1,
       borderBottomColor: C.border,
     },
-    headerTitle: { fontSize: 22, fontWeight: '800', color: C.text },
-    headerDate: { fontSize: 12, color: C.muted, marginTop: 2 },
+    headerTitle: { ...TITLE_STYLE, color: C.text },
+    headerDate: { ...SUBTITLE_STYLE, color: C.muted },
     editHeaderBtn: {
       width: 38,
       height: 38,

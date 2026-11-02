@@ -1,7 +1,7 @@
 // components/Reminders.tsx — Home reminders widget + reminders editor sheet
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Switch, TextInput,
+  View, Text, TouchableOpacity, StyleSheet, Modal, Switch,
   KeyboardAvoidingView, Platform, Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useCustomAlert } from '../contexts/AlertContext';
 import { WheelPicker } from './WheelPicker';
+import { SheetScroll, SheetInput } from './SheetKeyboard';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -253,8 +254,7 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
                 trackColor={{ false: C.border, true: C.accent }} thumbColor="#fff" />
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled
-              style={{ flexGrow: 0, flexShrink: 1 }}>
+            <SheetScroll nestedScrollEnabled style={{ flexGrow: 0, flexShrink: 1 }}>
               {groups.length === 0 && (
                 <View style={styles.empty}>
                   <Ionicons name="notifications-outline" size={26} color={C.muted} />
@@ -274,7 +274,7 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
                         <Ionicons name={REMINDER_KINDS[g.kind].icon as any} size={16} color={col} />
                       </View>
                       {g.kind === 'custom' ? (
-                        <TextInput style={styles.nameInput} defaultValue={g.label} placeholder="Name"
+                        <SheetInput style={styles.nameInput} defaultValue={g.label} placeholder="Name"
                           placeholderTextColor={C.muted}
                           onEndEditing={e => patchRows(g.rows, { label: e.nativeEvent.text.trim() || 'Reminder' })} />
                       ) : (
@@ -354,7 +354,7 @@ export function RemindersSheet({ visible, onClose }: { visible: boolean; onClose
                 })}
               </View>
               <View style={{ height: 8 }} />
-            </ScrollView>
+            </SheetScroll>
 
             <TouchableOpacity style={styles.doneBtn} onPress={close} activeOpacity={0.85}>
               <Text style={styles.doneTxt}>Done</Text>

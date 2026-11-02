@@ -17,7 +17,7 @@ export interface TabDef {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;        // inactive (outline)
   activeIcon: keyof typeof Ionicons.glyphMap;  // active (filled)
-  colorKey: 'accent' | 'purple' | 'teal' | 'orange' | 'green';
+  colorKey: 'accent' | 'purple' | 'teal' | 'orange' | 'yellow';
 }
 
 /** What expo-router's Tabs hands a custom tab bar. */
